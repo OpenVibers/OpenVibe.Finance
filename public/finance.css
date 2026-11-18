@@ -105,3 +105,9 @@ html[data-ov-motion="off"] .fin-btn:active, html[data-ov-motion="off"] .fin-acco
 .fin-bill-when { display: grid; justify-items: end; gap: 2px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .fin-bill-when small { color: var(--text-secondary, #9aa4b2); font-size: 12px; }
 .fin-bill.is-late .fin-bill-when small { color: var(--warning, #f59e0b); }
+/* Budgets (v0.4): the bar's budget mark, what is left or over. */
+.fin-bar { position: relative; }
+.fin-bars li.is-over .fin-bar > span { background: var(--danger, #ef4444); }
+.fin-bar-sum { display: grid; justify-items: end; gap: 1px; }
+.fin-bar-sum small { color: var(--text-secondary, #9aa4b2); font-size: 12px; }
+.fin-budget-sum { margin: 0 0 10px; color: var(--text-secondary, #9aa4b2); font-variant-numeric: tabular-nums; }

@@ -64,6 +64,8 @@ function createApp({ db, vault, auth, baseUrl = 'https://openvibe.finance', now 
     const said = (q) => {
         if (q.imported) { const [a, s] = String(q.imported).split(','); return `Imported ${Number(a) || 0} new transaction${Number(a) === 1 ? '' : 's'}${Number(s) ? `; ${Number(s)} already here` : ''}.`; }
         if (q.ruled != null) return `Rule made. It also put ${Number(q.ruled) || 0} earlier transaction${Number(q.ruled) === 1 ? '' : 's'} in that category.`;
+        if (q.budgeted) return 'Budget saved.';
+        if (q.unbudgeted) return 'Budget removed.';
         if (q.added) return 'Added.';
         if (q.removed) return 'Rule removed. What it categorised stays as it is.';
         if (q.deleted) return 'Everything is deleted.';
@@ -127,7 +129,7 @@ function createApp({ db, vault, auth, baseUrl = 'https://openvibe.finance', now 
     app.get('/month', handle(async (req, res) => {
         const me = who(req);
         if (!me) return signIn(req, res);
-        res.send(v.monthPage({ m: await store.month(me, monthOf(req.query.m)) }));
+        res.send(v.monthPage({ m: await store.month(me, monthOf(req.query.m)), budgets: await store.budgets(me), o: { said: said(req.query) } }));
     }));
     app.get('/bills', handle(async (req, res) => {
         const me = who(req);
@@ -146,6 +148,17 @@ function createApp({ db, vault, auth, baseUrl = 'https://openvibe.finance', now 
         if (!sameOrigin(req)) return res.status(403).send('A change must come from openvibe.finance itself.');
         await store.removeRule(me, req.params.id);
         res.redirect(303, '/rules?removed=1');
+    }));
+    app.post('/budgets', form, handle(async (req, res) => {
+        const me = who(req);
+        if (!me) return signIn(req, res);
+        if (!sameOrigin(req)) return res.status(403).send('A change must come from openvibe.finance itself.');
+        const text = String(req.body.amount || '').trim();
+        const cents = text ? readAmount(text) : null;
+        if (text && cents == null) throw new FinanceError(422, 'finance.budget.amount', 'The budget is not a number.');
+        await store.setBudget(me, req.body.category, cents == null ? null : Math.abs(cents));
+        const back = /^\d{4}-(0[1-9]|1[0-2])$/.test(String(req.body.back || '')) ? String(req.body.back) : thisMonth();
+        res.redirect(303, `/month?m=${back}&${cents ? 'budgeted' : 'unbudgeted'}=1`);
     }));
     app.get('/data', handle(async (req, res) => {
         if (!who(req)) return signIn(req, res);
@@ -183,6 +196,11 @@ function createApp({ db, vault, auth, baseUrl = 'https://openvibe.finance', now 
     }));
     api.get('/months/:m', handle(async (req, res) => res.json(await store.month(who(req), req.params.m))));
     api.get('/rules', handle(async (req, res) => res.json({ rules: await store.rules(who(req)) })));
+    api.get('/budgets', handle(async (req, res) => res.json({ budgets: await store.budgets(who(req)) })));
+    api.put('/budgets/:category', express.json({ limit: '2kb' }), handle(async (req, res) => {
+        const cents = req.body && req.body.monthly_cents;
+        res.json({ budget: await store.setBudget(who(req), decodeURIComponent(req.params.category), cents == null ? null : Number(cents)) });
+    }));
     api.get('/recurring', handle(async (req, res) => res.json({ recurring: findRecurring(await store.recent(who(req)), { today: now().toISOString().slice(0, 10) }).map(({ key, ...r }) => r) })));
     api.post('/rules', express.json({ limit: '4kb' }), handle(async (req, res) => res.status(201).json(await store.addRule(who(req), req.body || {}))));
     api.delete('/rules/:id', handle(async (req, res) => { await store.removeRule(who(req), req.params.id); res.status(204).end(); }));

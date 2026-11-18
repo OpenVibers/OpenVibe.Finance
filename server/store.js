@@ -17,6 +17,8 @@
  *   rules(owner)                            → [{ id, match, category }] (longest words first)
  *   addRule(owner, { match, category })     the same words again replace the category; applied to the past
  *   removeRule(owner, id)
+ *   budgets(owner)                          → [{ category, monthly_cents }]
+ *   setBudget(owner, category, cents|null)  a monthly limit for a category; null or 0 removes it
  *   exportAll(owner)                        → everything, opened (the person's own copy)
  *   removeAll(owner)                        → everything of theirs deleted
  */
@@ -233,6 +235,25 @@ function createStore({ db, vault }) {
         await db.exec('DELETE FROM finance_rules WHERE id = $1 AND owner = $2', [String(id || ''), owner]);
     }
 
+    async function budgets(owner) {
+        own(owner);
+        const rows = await db.many('SELECT category, monthly_cents FROM finance_budgets WHERE owner = $1 ORDER BY category', [owner]);
+        return rows.map((r) => ({ category: r.category, monthly_cents: Number(r.monthly_cents) }));
+    }
+
+    async function setBudget(owner, category, cents) {
+        own(owner);
+        const c = cleanCategory(category);
+        if (c === 'Uncategorized' || c === 'Income' || c === 'Transfers') fail(422, 'finance.budget.category', `A budget is for a category of spending, not ${c}.`);
+        if (cents == null || cents === 0) { await db.exec('DELETE FROM finance_budgets WHERE owner = $1 AND category = $2', [owner, c]); return null; }
+        if (!Number.isSafeInteger(cents) || cents < 0 || cents > 1e11) fail(422, 'finance.budget.amount', 'A budget is an amount of money a month.');
+        const count = Number(await db.value('SELECT count(*) FROM finance_budgets WHERE owner = $1', [owner]));
+        if (count >= 100) fail(422, 'finance.budget.limit', 'A hundred budgets is the most for now.');
+        await db.exec(`INSERT INTO finance_budgets (owner, category, monthly_cents) VALUES ($1, $2, $3)
+            ON CONFLICT (owner, category) DO UPDATE SET monthly_cents = EXCLUDED.monthly_cents, updated_at = now()`, [owner, c, cents]);
+        return { category: c, monthly_cents: cents };
+    }
+
     async function exportAll(owner) {
         own(owner);
         const accs = await db.many('SELECT id, name, kind, currency, opening_cents, created_at, archived_at FROM finance_accounts WHERE owner = $1 ORDER BY created_at', [owner]);
@@ -242,6 +263,7 @@ function createStore({ db, vault }) {
             accounts: accs.map((a) => ({ ...a, opening_cents: Number(a.opening_cents) })),
             transactions: txns.map((r) => open(owner, r)),
             rules: (await rules(owner)).map((r) => ({ match: r.match, category: r.category })),
+            budgets: await budgets(owner),
         };
     }
 
@@ -251,11 +273,12 @@ function createStore({ db, vault }) {
             await t.exec('DELETE FROM finance_transactions WHERE owner = $1', [owner]);
             await t.exec('DELETE FROM finance_imports WHERE owner = $1', [owner]);
             await t.exec('DELETE FROM finance_rules WHERE owner = $1', [owner]);
+            await t.exec('DELETE FROM finance_budgets WHERE owner = $1', [owner]);
             await t.exec('DELETE FROM finance_accounts WHERE owner = $1', [owner]);
         });
     }
 
-    return { recent, accounts, account, addAccount, transactions, addTransaction, setCategory, removeTransaction, importRows, month, rules, addRule, removeRule, applyRules, exportAll, removeAll };
+    return { recent, accounts, account, addAccount, transactions, addTransaction, setCategory, removeTransaction, importRows, month, rules, addRule, removeRule, applyRules, budgets, setBudget, exportAll, removeAll };
 }
 
 module.exports = { createStore, FinanceError, KINDS, CATEGORIES, matchable };

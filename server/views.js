@@ -142,9 +142,30 @@ ${notice(o)}${cats}
 ${txns.length ? [...groups.values()].map((list) => `<ul class="fin-txns">${list.map(row).join('')}</ul>`).join('') : `<p class="fin-empty">Nothing in ${esc(monthName(month))}. Add a transaction, or import a CSV.</p>`}` });
 }
 
-function monthPage({ m, o = {} }) {
-    const spent = m.by_category.filter((c) => c.out_cents > 0);
-    const most = Math.max(1, ...spent.map((c) => c.out_cents));
+function monthPage({ m, budgets = [], o = {} }) {
+    const limit = new Map(budgets.map((b) => [b.category, b.monthly_cents]));
+    const spentBy = new Map(m.by_category.filter((c) => c.out_cents > 0).map((c) => [c.category, c]));
+    // Budgeted categories with nothing spent yet still show: what is left is the whole budget.
+    for (const b of budgets) if (!spentBy.has(b.category)) spentBy.set(b.category, { category: b.category, out_cents: 0, count: 0 });
+    const spent = [...spentBy.values()].sort((a, b) => b.out_cents - a.out_cents);
+    // Budgets read against their own limit (a full bar is the budget, red once over); the rest against the largest.
+    const withBudget = spent.filter((c) => limit.has(c.category));
+    const without = spent.filter((c) => !limit.has(c.category));
+    const most = Math.max(1, ...without.map((c) => c.out_cents));
+    const budgeted = budgets.reduce((n, b) => n + b.monthly_cents, 0);
+    // What the budgeted categories really spent (an overspend is counted, not capped at its budget).
+    const usedOfBudgets = withBudget.reduce((n, c) => n + c.out_cents, 0);
+    const cats = `<datalist id="fin-cats">${CATEGORIES.filter((c) => !['Income', 'Transfers', 'Uncategorized'].includes(c)).map((c) => `<option value="${esc(c)}">`).join('')}</datalist>`;
+    const budgetBar = (c) => {
+        const cap = limit.get(c.category);
+        const over = c.out_cents > cap;
+        const left = cap - c.out_cents;
+        return `<li class="${over ? 'is-over' : ''}"><span class="fin-bar-name">${esc(c.category)}<small>${c.count}</small></span>
+<span class="fin-bar fin-bar--budget"><span style="--w:${Math.min(100, Math.round((c.out_cents / cap) * 100))}%"></span></span>
+<span class="fin-bar-sum">${esc(money(c.out_cents))}<small class="${over ? 'is-neg' : ''}">of ${esc(money(cap))} · ${over ? `${esc(money(-left))} over` : `${esc(money(left))} left`}</small></span></li>`;
+    };
+    const bar = (c) => `<li><span class="fin-bar-name">${esc(c.category)}<small>${c.count}</small></span>
+<span class="fin-bar"><span style="--w:${Math.max(2, Math.round((c.out_cents / most) * 100))}%"></span></span><span class="fin-bar-sum">${esc(money(c.out_cents))}</span></li>`;
     return page({
         title: `${monthName(m.month)}`, path: '/month', body: `
 <header class="fin-head"><p class="fin-crumb"><a href="/">Your money</a></p><h1>${esc(monthName(m.month))}</h1></header>
@@ -152,9 +173,16 @@ ${notice(o)}
 <nav class="fin-monthnav" aria-label="Month"><a href="/month?m=${shiftMonth(m.month, -1)}">${esc(monthName(shiftMonth(m.month, -1)))}</a><b>${esc(monthName(m.month))}</b><a href="/month?m=${shiftMonth(m.month, 1)}">${esc(monthName(shiftMonth(m.month, 1)))}</a></nav>
 <div class="fin-sums"><p><span>In</span><b class="fin-in">${esc(money(m.income_cents))}</b></p><p><span>Out</span><b class="fin-out">${esc(money(m.spent_cents))}</b></p>
 <p><span>Left</span><b class="${m.income_cents - m.spent_cents < 0 ? 'is-neg' : ''}">${esc(money(m.income_cents - m.spent_cents))}</b></p></div>
-${spent.length ? `<ul class="fin-bars">${spent.map((c) => `<li><span class="fin-bar-name">${esc(c.category)}<small>${c.count}</small></span>
-<span class="fin-bar"><span style="--w:${Math.max(2, Math.round((c.out_cents / most) * 100))}%"></span></span><span class="fin-bar-sum">${esc(money(c.out_cents))}</span></li>`).join('')}</ul>`
-        : '<p class="fin-empty">No spending this month.</p>'}
+${withBudget.length ? `<section class="fin-sec"><h2>Budgets</h2><p class="fin-budget-sum">${esc(money(usedOfBudgets))} of ${esc(money(budgeted))} spent</p>
+<ul class="fin-bars">${withBudget.map(budgetBar).join('')}</ul></section>` : ''}
+${without.length ? `<section class="fin-sec">${withBudget.length ? '<h2>Everything else</h2>' : ''}<ul class="fin-bars">${without.map(bar).join('')}</ul></section>` : (withBudget.length ? '' : '<p class="fin-empty">No spending this month.</p>')}
+<details class="fin-fold"><summary>${budgets.length ? 'Change a budget' : 'Set a monthly budget for a category'}</summary>
+<form class="fin-form" method="post" action="/budgets">${cats}
+<div class="fin-row"><label class="fin-field"><span>Category</span><input name="category" list="fin-cats" required maxlength="60" placeholder="Eating out" autocomplete="off"></label>
+<label class="fin-field"><span>A month</span><input name="amount" inputmode="decimal" placeholder="300.00 (empty removes it)" autocomplete="off"></label></div>
+<input type="hidden" name="back" value="${esc(m.month)}">
+<p><button class="fin-btn fin-btn--primary" type="submit">Save the budget</button></p>
+</form></details>
 <p class="fin-note">Transfers between your own accounts are left out. Amounts in other currencies are added as they are.</p>` });
 }
 
