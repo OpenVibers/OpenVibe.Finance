@@ -51,7 +51,7 @@ function createApp({ db, vault, auth, mcpAuth = null, baseUrl = 'https://openvib
     const finMcp = require('./mcp').createMcp({ store, aheadFor: (me, q) => aheadFor(me, q), now });
     const bearerOnly = (req, _res, next) => { if (!/^Bearer\s+\S/i.test(String(req.get('authorization') || ''))) { delete req.headers.cookie; req.user = undefined; } next(); };
     const mcpWho = mcpAuth || auth;
-    app.post('/mcp', express.json({ limit: '64kb' }), bearerOnly, (req, res, next) => (mcpWho && /^Bearer\s/i.test(String(req.get('authorization') || '')) ? mcpWho.optionalAuth()(req, res, next) : next()),
+    app.post('/mcp', express.json({ limit: '5mb' }), bearerOnly, (req, res, next) => (mcpWho && /^Bearer\s/i.test(String(req.get('authorization') || '')) ? mcpWho.optionalAuth()(req, res, next) : next()),
         (req, res, next) => { res.set('Cache-Control', 'private, no-store'); Promise.resolve(finMcp.handler(req, res)).catch(next); });
     app.all('/mcp', (_req, res) => res.status(405).set('Allow', 'POST').json({ error: 'POST a JSON-RPC request.' }));
     app.use(auth ? auth.optionalAuth() : (_req, _res, next) => next());

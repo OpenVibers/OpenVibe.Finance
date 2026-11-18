@@ -4,7 +4,10 @@
  * permissions (transactions.read), never a bank login"). An agent the person allowed reads their money as them, and
  * nothing more:
  *
- * - **Read only.** Every tool is readOnlyHint; none writes, imports, deletes or moves money. "No money moves."
+ * - **Read, and with a write grant a little writing.** Seven tools are readOnlyHint. Four write (v0.10): import a bank's
+ *   download, add a transaction, categorise, add a rule; they need the person's own sign-in or a delegated token whose
+ *   scope is write (a write grant in OpenVibe Finance on the Apps page; Network lists them only then). Nothing deletes;
+ *   nothing moves money. A category an agent sets is marked ('ai') and never overwrites one the person set.
  * - **As the person, by a Bearer token only:** their own session's, or a delegated person token (SDK 0.187) that names
  *   this service, which OpenVibe.Network mints per call for a key with a grant in OpenVibe Finance (Connect, /mcp/all).
  *   Cookies are never read here, so a page elsewhere cannot use a signed-in browser. The pages and the JSON API keep
@@ -15,20 +18,28 @@
  *   createMcp({ store, aheadFor, now }) → { tools, handler(req, res) }   req.user is the person (or nobody)
  */
 const mcp = require('openvibe-sdk/mcp');
-const { FinanceError } = require('./store');
+const { isDelegated } = require('openvibe-sdk/auth/delegated');
+const { FinanceError, CATEGORIES } = require('./store');
+const { readCsv } = require('./csv');
+const { isOfx, readOfx } = require('./ofx');
 const { findRecurring } = require('./recurring');
 const { payoff } = require('./plan');
 
 const SERVER_INFO = { name: 'openvibe-finance', title: 'OpenVibe Finance', version: require('../package.json').version };
 const INSTRUCTIONS = 'Read one person\'s money on OpenVibe Finance, as them: accounts and balances, a month by category with budgets, '
     + 'transactions, recurring bills and income, goals and debt payoff, net worth over time, and what-if ("can I afford this?"). '
-    + 'Amounts are integer cents; months are YYYY-MM. Read only: nothing here moves money or changes anything.';
+    + 'Amounts are integer cents; months are YYYY-MM. With a write grant it can also import a bank\'s download, add a transaction, '
+    + 'categorise transactions and add a rule. Nothing here deletes anything or moves money.';
 const READ = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
+const WRITE = (idempotent) => ({ readOnlyHint: false, destructiveHint: false, idempotentHint: idempotent, openWorldHint: false });
+const DAY = { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$', description: 'A day, YYYY-MM-DD.' };
+const ACCOUNT = { type: 'string', maxLength: 64, description: 'The account (from accounts).' };
+const CATEGORY = { type: 'string', minLength: 1, maxLength: 60, description: `A category: ${CATEGORIES.join(', ')} (or your own).` };
 const MONTH = { type: 'string', pattern: '^\\d{4}-(0[1-9]|1[0-2])$', description: 'A month, YYYY-MM.' };
-const tool = (name, title, description, properties = {}) => ({
+const tool = (name, title, description, properties = {}, { required = [], annotations = READ } = {}) => ({
     name, title, description,
-    inputSchema: { type: 'object', properties, additionalProperties: false },
-    annotations: { title, ...READ },
+    inputSchema: { type: 'object', properties, ...(required.length ? { required } : {}), additionalProperties: false },
+    annotations: { title, ...annotations },
 });
 
 const TOOLS = [
@@ -48,6 +59,20 @@ const TOOLS = [
         direction: { type: 'string', enum: ['out', 'in'], description: 'out: more going out (rent rises); in: more coming in. out by default.' },
         from: { ...MONTH, description: 'The month the change starts (next month by default).' },
     }),
+    // ── Writing, with a write grant (v0.10) ──
+    tool('import_statement', 'Import a bank download', 'Import a bank\'s download into one account: CSV (the columns read from its header), OFX or QFX. The same file twice, or two that overlap, add each transaction once. Answers how many were added and how many were already there.', {
+        account_id: ACCOUNT, text: { type: 'string', minLength: 1, maxLength: 4000000, description: 'The file\'s text.' },
+    }, { required: ['account_id', 'text'], annotations: WRITE(true) }),
+    tool('add_transaction', 'Add a transaction', 'Add one transaction to an account: the day, the amount in cents (negative is money out), the payee, and optionally a memo and a category.', {
+        account_id: ACCOUNT, posted_on: DAY, amount_cents: { type: 'integer', minimum: -1e11, maximum: 1e11, description: 'Cents; negative is money out.' },
+        payee: { type: 'string', minLength: 1, maxLength: 300 }, memo: { type: 'string', maxLength: 500 }, category: CATEGORY,
+    }, { required: ['account_id', 'posted_on', 'amount_cents', 'payee'], annotations: WRITE(false) }),
+    tool('categorize', 'Categorise transactions', 'Put transactions in categories (up to 200 at once). A category the person set themselves is left as it is; one an agent sets is marked as an agent\'s, for them to check.', {
+        items: { type: 'array', minItems: 1, maxItems: 200, description: '[{ transaction_id, category }]', items: { type: 'object', properties: { transaction_id: { type: 'string', maxLength: 64 }, category: CATEGORY }, required: ['transaction_id', 'category'], additionalProperties: false } },
+    }, { required: ['items'], annotations: WRITE(true) }),
+    tool('add_rule', 'Add a category rule', 'Always put a payee in a category: words of the payee (numbers in it are ignored) and the category. It applies to every uncategorised transaction now and to every import after.', {
+        match: { type: 'string', minLength: 2, maxLength: 120, description: 'Words of the payee, such as "streamflix".' }, category: CATEGORY,
+    }, { required: ['match', 'category'], annotations: WRITE(true) }),
 ];
 
 function createMcp({ store, aheadFor, now = () => new Date() }) {
@@ -93,6 +118,34 @@ function createMcp({ store, aheadFor, now = () => new Date() }) {
         async net_worth(me) {
             return { net_worth: (await aheadFor(me)).net_worth };
         },
+        async import_statement(me, args) {
+            if (!(await store.account(me, args.account_id))) throw new FinanceError(404, 'finance.account.not_found', 'No such account of yours.');
+            const read = isOfx(args.text) ? readOfx(args.text) : readCsv(args.text);
+            if (read.problem) throw new FinanceError(422, 'finance.import.unreadable', read.problem);
+            const out = await store.importRows(me, args.account_id, read.rows);
+            return { added: out.added, already_there: out.skipped, unreadable_lines: read.skipped.length };
+        },
+        async add_transaction(me, args) {
+            const t = await store.addTransaction(me, args.account_id, { posted_on: args.posted_on, amount_cents: args.amount_cents, payee: args.payee, memo: args.memo || '', category: args.category || '' });
+            return { transaction: { id: t.id, posted_on: t.posted_on, amount_cents: t.amount_cents, payee: t.payee, category: t.category } };
+        },
+        async categorize(me, args, ctx) {
+            const out = { changed: 0, kept_yours: 0, not_found: 0 };
+            for (const it of args.items) {
+                if (!it || typeof it !== 'object' || typeof it.transaction_id !== 'string' || typeof it.category !== 'string' || !it.category.trim()) throw new FinanceError(422, 'finance.mcp.items', 'Each item is { transaction_id, category }.');
+                try { await store.setCategory(me, it.transaction_id, it.category, { from: ctx.agent ? 'ai' : 'you' }); out.changed += 1; } catch (err) {
+                    if (!(err instanceof FinanceError)) throw err;
+                    if (err.status === 409) out.kept_yours += 1;
+                    else if (err.status === 404) out.not_found += 1;
+                    else throw err;
+                }
+            }
+            return out;
+        },
+        async add_rule(me, args) {
+            const r = await store.addRule(me, { match: args.match, category: args.category });
+            return { rule: { match: r.match, category: r.category }, applied_now: r.applied };
+        },
         async what_if(me, args) {
             const q = {};
             if (args.cost_cents) q.cost = (args.cost_cents / 100).toFixed(2);
@@ -111,11 +164,13 @@ function createMcp({ store, aheadFor, now = () => new Date() }) {
     function badArgs(def, args) {
         if (!args || typeof args !== 'object' || Array.isArray(args)) return 'The arguments are an object.';
         const props = def.inputSchema.properties;
+        for (const k of def.inputSchema.required || []) if (args[k] === undefined || args[k] === null) return `${def.name} needs "${k}".`;
         for (const [k, v] of Object.entries(args)) {
             const p = props[k];
             if (!p) return `${def.name} takes no "${k}".`;
             if (p.type === 'integer' && (!Number.isSafeInteger(v) || v < (p.minimum ?? -Infinity) || v > (p.maximum ?? Infinity))) return `"${k}" is a whole number${p.maximum ? ` from ${p.minimum} to ${p.maximum}` : ''}.`;
-            if (p.type === 'string' && (typeof v !== 'string' || (p.maxLength && v.length > p.maxLength) || (p.pattern && !new RegExp(p.pattern).test(v)) || (p.enum && !p.enum.includes(v)))) return `"${k}" is not right: ${p.description || 'see the schema'}`;
+            if (p.type === 'array' && (!Array.isArray(v) || v.length < (p.minItems || 0) || v.length > (p.maxItems || Infinity))) return `"${k}" is a list of ${p.minItems || 0} to ${p.maxItems} items.`;
+            if (p.type === 'string' && (typeof v !== 'string' || (p.minLength && v.length < p.minLength) || (p.maxLength && v.length > p.maxLength) || (p.pattern && !new RegExp(p.pattern).test(v)) || (p.enum && !p.enum.includes(v)))) return `"${k}" is not right: ${p.description || 'see the schema'}`;
         }
         return null;
     }
@@ -131,7 +186,11 @@ function createMcp({ store, aheadFor, now = () => new Date() }) {
         const args = params.arguments == null ? {} : params.arguments;
         const bad = badArgs(def, args);
         if (bad) return { result: asError(bad) };
-        try { return { result: asResult(await RUN[def.name](me, args)) }; } catch (err) {
+        // Something acting for the person (a delegated token) writes only with a write grant; the person themselves may.
+        const agent = isDelegated(req.user);
+        const scope = agent ? String((req.user.delegated && req.user.delegated.scope) || (req.user.scope) || 'read') : 'write';
+        if (!def.annotations.readOnlyHint && scope !== 'write') return { result: asError('This changes your Finance data, and this agent may only read: give it read and write in OpenVibe Finance on your Apps page (https://openvibe.network/apps).') };
+        try { return { result: asResult(await RUN[def.name](me, args, { agent })) }; } catch (err) {
             if (err instanceof FinanceError) return { result: asError(err.message) };
             throw err;
         }

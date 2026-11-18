@@ -10,7 +10,8 @@
  *   addAccount(owner, { name, kind, currency, opening_cents })
  *   transactions(owner, accountId, { month }) → [{ id, posted_on, amount_cents, payee, memo, category, category_from }]
  *   addTransaction(owner, accountId, { posted_on, amount_cents, payee, memo, category })
- *   setCategory(owner, id, category)        a correction: a new revision, category_from 'you'
+ *   setCategory(owner, id, category, { from }) a correction: a new revision, category_from 'you' (or 'ai': an agent the
+ *                                           person allowed to write; it never overwrites one they set themselves)
  *   removeTransaction(owner, id)
  *   importRows(owner, accountId, rows)      → { import_id, read, added, skipped } (the same row twice is one)
  *   month(owner, 'YYYY-MM')                 → { month, income_cents, spent_cents, by_category: [{ category, cents, count }] }
@@ -131,12 +132,17 @@ function createStore({ db, vault }) {
         return open(owner, await db.one('SELECT * FROM finance_transactions WHERE id = $1', [id]));
     }
 
-    async function setCategory(owner, id, category) {
+    async function setCategory(owner, id, category, { from = 'you' } = {}) {
         own(owner);
         const c = cleanCategory(category);
-        const n = await db.exec(`UPDATE finance_transactions SET category = $3, category_from = 'you', revision = revision + 1, updated_at = now()
-            WHERE id = $1 AND owner = $2`, [String(id || ''), owner, c]);
-        if (!n) fail(404, 'finance.transaction.not_found', 'No such transaction of yours.');
+        const by = from === 'ai' ? 'ai' : 'you';
+        const n = await db.exec(`UPDATE finance_transactions SET category = $3, category_from = $4, revision = revision + 1, updated_at = now()
+            WHERE id = $1 AND owner = $2 AND ($4 = 'you' OR category_from <> 'you')`, [String(id || ''), owner, c, by]);
+        if (!n) {
+            const row = await db.maybe('SELECT category_from FROM finance_transactions WHERE id = $1 AND owner = $2', [String(id || ''), owner]);
+            if (!row) fail(404, 'finance.transaction.not_found', 'No such transaction of yours.');
+            fail(409, 'finance.transaction.yours', 'You set this category yourself: an agent leaves it as it is.');
+        }
         return open(owner, await db.one('SELECT * FROM finance_transactions WHERE id = $1', [String(id)]));
     }
 
