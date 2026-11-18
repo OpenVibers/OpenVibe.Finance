@@ -24,9 +24,10 @@ const readExport = (text) => (isOfx(text) ? readOfx(text) : readCsv(text));
 const { findRecurring } = require('./recurring');
 const { pdfText } = require('./pdf');
 const { readStatement } = require('./statement');
+const receipts = require('./receipt');
 const v = require('./views');
 
-function createApp({ db, vault, auth, mcpAuth = null, baseUrl = 'https://openvibe.finance', now = () => new Date() }) {
+function createApp({ db, vault, auth, mcpAuth = null, baseUrl = 'https://openvibe.finance', now = () => new Date(), readImage = receipts.ocr }) {
     const store = createStore({ db, vault });
     const app = express();
     app.disable('x-powered-by');
@@ -146,6 +147,26 @@ function createApp({ db, vault, auth, mcpAuth = null, baseUrl = 'https://openvib
         const read = readStatement(text.pages.join('\n'), { today: now().toISOString().slice(0, 10) });
         if (read.problem) throw new FinanceError(422, 'finance.statement.no_rows', `${read.problem} Your bank's CSV, OFX or QFX download works too.`);
         res.send(v.statementPreview({ account, read, name: String(req.body.name || '').slice(0, 120) }));
+    }));
+    // A receipt photo (v0.12): read on this server by Tesseract from memory, never written, sent or kept; the add form,
+    // filled in, for the person to check.
+    app.post('/accounts/:id/receipt', pdfForm, handle(async (req, res) => {
+        const me = who(req);
+        if (!me) return signIn(req, res);
+        if (!sameOrigin(req)) return res.status(403).send('A change must come from openvibe.finance itself.');
+        const account = await store.account(me, req.params.id);
+        if (!account) throw new FinanceError(404, 'finance.account.not_found', 'No such account of yours.');
+        const m = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(String(req.body.image || ''));
+        if (!m) throw new FinanceError(422, 'finance.receipt.image', 'Choose a photo of the receipt (JPEG, PNG or WebP).');
+        const bytes = Buffer.from(m[2], 'base64');
+        if (bytes.length > 6 * 1024 * 1024) throw new FinanceError(413, 'finance.receipt.too_large', 'That photo is over 6 MB.');
+        let text;
+        try { text = await readImage(bytes); } catch (err) {
+            if (err instanceof receipts.ReceiptError) throw new FinanceError(422, 'finance.receipt.unreadable', err.message);
+            throw err;
+        }
+        const today = now().toISOString().slice(0, 10);
+        res.send(v.receiptPreview({ account, r: receipts.readReceipt(text, { today }), today }));
     }));
     app.post('/accounts/:id/statement/import', pdfForm, handle(async (req, res) => {
         const me = who(req);
