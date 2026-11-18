@@ -59,6 +59,14 @@ function createStore({ db, vault }) {
         return rows.map((r) => ({ id: r.id, name: r.name, kind: r.kind, currency: r.currency, balance_cents: Number(r.opening_cents) + Number(r.moved), count: r.count, last_on: r.last_on || null }));
     }
 
+    /** Every transaction of the person from the last `days` days, across their accounts, opened (recurring, scenarios). */
+    async function recent(owner, { days = 400, limit = 20000 } = {}) {
+        own(owner);
+        const rows = await db.many(`SELECT t.* FROM finance_transactions t JOIN finance_accounts a ON a.id = t.account_id AND a.archived_at IS NULL
+            WHERE t.owner = $1 AND t.posted_on >= (CURRENT_DATE - $2::int) ORDER BY t.posted_on, t.id LIMIT ${Math.max(1, Math.min(50000, Number(limit) || 20000))}`, [owner, Math.max(1, Math.min(2000, Number(days) || 400))]);
+        return rows.map((r) => open(owner, r));
+    }
+
     async function account(owner, id) {
         own(owner);
         const r = await db.maybe('SELECT id, name, kind, currency, opening_cents FROM finance_accounts WHERE id = $1 AND owner = $2 AND archived_at IS NULL', [String(id || ''), owner]);
@@ -247,7 +255,7 @@ function createStore({ db, vault }) {
         });
     }
 
-    return { accounts, account, addAccount, transactions, addTransaction, setCategory, removeTransaction, importRows, month, rules, addRule, removeRule, applyRules, exportAll, removeAll };
+    return { recent, accounts, account, addAccount, transactions, addTransaction, setCategory, removeTransaction, importRows, month, rules, addRule, removeRule, applyRules, exportAll, removeAll };
 }
 
 module.exports = { createStore, FinanceError, KINDS, CATEGORIES, matchable };
