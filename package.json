@@ -1,0 +1,23 @@
+{
+  "name": "openvibe-finance",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Your money, your rules, your data: accounts, CSV imports and a monthly picture, private to you",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "test": "node test/run.js",
+    "test:pg": "FINANCE_TEST_STORE=pg node test/run.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "AGPL-3.0-only",
+  "dependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "express": "^4.21.2",
+    "openvibe-sdk": "https://git.openvibe.codes/api/v1/repos/openvibers/openvibe.sdk/archive/v0.187.0.tar.gz",
+    "openvibe-shared": "https://git.openvibe.codes/api/v1/repos/openvibers/openvibe.shared/archive/v4.314.0.tar.gz",
+    "pg": "^8.23.1"
+  }
+}
