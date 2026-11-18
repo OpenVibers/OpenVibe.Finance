@@ -67,6 +67,8 @@ function createApp({ db, vault, auth, baseUrl = 'https://openvibe.finance', now 
     const said = (q) => {
         if (q.imported) { const [a, s] = String(q.imported).split(','); return `Imported ${Number(a) || 0} new transaction${Number(a) === 1 ? '' : 's'}${Number(s) ? `; ${Number(s)} already here` : ''}.`; }
         if (q.ruled != null) return `Rule made. It also put ${Number(q.ruled) || 0} earlier transaction${Number(q.ruled) === 1 ? '' : 's'} in that category.`;
+        if (q.goal) return 'Goal added.';
+        if (q.debt) return 'Saved.';
         if (q.budgeted) return 'Budget saved.';
         if (q.unbudgeted) return 'Budget removed.';
         if (q.added) return 'Added.';
@@ -140,6 +142,31 @@ function createApp({ db, vault, auth, baseUrl = 'https://openvibe.finance', now 
         const today = now().toISOString().slice(0, 10);
         res.send(v.billsPage({ found: findRecurring(await store.recent(me), { today }), today }));
     }));
+    app.get('/goals', handle(async (req, res) => {
+        const me = who(req);
+        if (!me) return signIn(req, res);
+        res.send(v.goalsPage({ goals: await store.goals(me), accounts: await store.accounts(me), today: now().toISOString().slice(0, 10), o: { said: said(req.query) } }));
+    }));
+    const writer = (fn) => [form, handle(async (req, res) => {
+        const me = who(req);
+        if (!me) return signIn(req, res);
+        if (!sameOrigin(req)) return res.status(403).send('A change must come from openvibe.finance itself.');
+        await fn(me, req, res);
+    })];
+    const cents = (text, what) => { const c = readAmount(text); if (c == null) throw new FinanceError(422, 'finance.amount', `${what} is not a number.`); return Math.abs(c); };
+    app.post('/goals', ...writer(async (me, req, res) => {
+        await store.addGoal(me, { name: req.body.name, target_cents: cents(req.body.target, 'The amount'), target_on: req.body.target_on || null, account_id: req.body.account || null });
+        res.redirect(303, '/goals?goal=1');
+    }));
+    app.post('/goals/:id/saved', ...writer(async (me, req, res) => { await store.setGoalSaved(me, req.params.id, cents(req.body.saved, 'Saved so far')); res.redirect(303, '/goals'); }));
+    app.post('/goals/:id/delete', ...writer(async (me, req, res) => { await store.removeGoal(me, req.params.id); res.redirect(303, '/goals'); }));
+    app.post('/accounts/:id/debt', ...writer(async (me, req, res) => {
+        const aprText = String(req.body.apr || '').trim(), payText = String(req.body.payment || '').trim();
+        const apr = aprText ? Math.round(Number(aprText.replace('%', '')) * 100) : null;
+        if (aprText && !Number.isFinite(apr)) throw new FinanceError(422, 'finance.debt.rate', 'The rate is not a number.');
+        await store.setDebt(me, req.params.id, { apr_bps: apr, payment_cents: payText ? cents(payText, 'The payment') : null });
+        res.redirect(303, '/goals?debt=1');
+    }));
     app.get('/rules', handle(async (req, res) => {
         const me = who(req);
         if (!me) return signIn(req, res);
@@ -200,6 +227,8 @@ function createApp({ db, vault, auth, baseUrl = 'https://openvibe.finance', now 
     api.get('/months/:m', handle(async (req, res) => res.json(await store.month(who(req), req.params.m))));
     api.get('/rules', handle(async (req, res) => res.json({ rules: await store.rules(who(req)) })));
     api.get('/budgets', handle(async (req, res) => res.json({ budgets: await store.budgets(who(req)) })));
+    api.get('/goals', handle(async (req, res) => res.json({ goals: await store.goals(who(req)) })));
+    api.post('/goals', express.json({ limit: '4kb' }), handle(async (req, res) => res.status(201).json(await store.addGoal(who(req), req.body || {}))));
     api.put('/budgets/:category', express.json({ limit: '2kb' }), handle(async (req, res) => {
         const cents = req.body && req.body.monthly_cents;
         res.json({ budget: await store.setBudget(who(req), decodeURIComponent(req.params.category), cents == null ? null : Number(cents)) });

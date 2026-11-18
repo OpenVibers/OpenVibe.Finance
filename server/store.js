@@ -19,6 +19,9 @@
  *   removeRule(owner, id)
  *   budgets(owner)                          → [{ category, monthly_cents }]
  *   setBudget(owner, category, cents|null)  a monthly limit for a category; null or 0 removes it
+ *   goals(owner)                            → [{ id, name, target_cents, target_on, account_id, saved_cents, have_cents }]
+ *   addGoal(owner, { name, target_cents, target_on, account_id, saved_cents }) / setGoalSaved(owner, id, cents) / removeGoal
+ *   setDebt(owner, accountId, { apr_bps, payment_cents })   a loan's or card's rate and monthly payment
  *   exportAll(owner)                        → everything, opened (the person's own copy)
  *   removeAll(owner)                        → everything of theirs deleted
  */
@@ -54,11 +57,12 @@ function createStore({ db, vault }) {
 
     async function accounts(owner) {
         own(owner);
-        const rows = await db.many(`SELECT a.id, a.name, a.kind, a.currency, a.opening_cents,
+        const rows = await db.many(`SELECT a.id, a.name, a.kind, a.currency, a.opening_cents, a.apr_bps, a.payment_cents,
                 COALESCE(SUM(t.amount_cents), 0)::bigint AS moved, COUNT(t.id)::int AS count, MAX(t.posted_on) AS last_on
             FROM finance_accounts a LEFT JOIN finance_transactions t ON t.account_id = a.id
             WHERE a.owner = $1 AND a.archived_at IS NULL GROUP BY a.id ORDER BY a.created_at, a.id`, [owner]);
-        return rows.map((r) => ({ id: r.id, name: r.name, kind: r.kind, currency: r.currency, balance_cents: Number(r.opening_cents) + Number(r.moved), count: r.count, last_on: r.last_on || null }));
+        return rows.map((r) => ({ id: r.id, name: r.name, kind: r.kind, currency: r.currency, balance_cents: Number(r.opening_cents) + Number(r.moved), count: r.count, last_on: r.last_on || null,
+            apr_bps: r.apr_bps == null ? null : Number(r.apr_bps), payment_cents: r.payment_cents == null ? null : Number(r.payment_cents) }));
     }
 
     /** Every transaction of the person from the last `days` days, across their accounts, opened (recurring, scenarios). */
@@ -257,9 +261,57 @@ function createStore({ db, vault }) {
         return { category: c, monthly_cents: cents };
     }
 
+    async function goals(owner) {
+        own(owner);
+        const rows = await db.many('SELECT * FROM finance_goals WHERE owner = $1 ORDER BY created_at, id', [owner]);
+        const balances = new Map((await accounts(owner)).map((a) => [a.id, a.balance_cents]));
+        return rows.map((g) => ({
+            id: g.id, name: g.name, target_cents: Number(g.target_cents), target_on: g.target_on || null, account_id: g.account_id || null,
+            saved_cents: Number(g.saved_cents), have_cents: g.account_id && balances.has(g.account_id) ? balances.get(g.account_id) : Number(g.saved_cents),
+        }));
+    }
+
+    async function addGoal(owner, input = {}) {
+        own(owner);
+        const name = String(input.name || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+        if (!name) fail(422, 'finance.goal.name', 'Give the goal a name.');
+        if (!Number.isSafeInteger(input.target_cents) || input.target_cents <= 0) fail(422, 'finance.goal.target', 'A goal is an amount to reach.');
+        const on = input.target_on ? String(input.target_on) : null;
+        if (on && (!DAY.test(on) || Number.isNaN(Date.parse(`${on}T00:00:00Z`)))) fail(422, 'finance.goal.date', 'A date is YYYY-MM-DD.');
+        let accountId = input.account_id ? String(input.account_id) : null;
+        if (accountId && !(await account(owner, accountId))) fail(404, 'finance.account.not_found', 'No such account of yours.');
+        const saved = Number.isSafeInteger(input.saved_cents) && input.saved_cents > 0 ? input.saved_cents : 0;
+        if (Number(await db.value('SELECT count(*) FROM finance_goals WHERE owner = $1', [owner])) >= 50) fail(422, 'finance.goal.limit', 'Fifty goals is the most for now.');
+        const id = newId('gol');
+        await db.exec('INSERT INTO finance_goals (id, owner, name, target_cents, target_on, account_id, saved_cents) VALUES ($1, $2, $3, $4, $5, $6, $7)', [id, owner, name, input.target_cents, on, accountId, saved]);
+        return (await goals(owner)).find((g) => g.id === id);
+    }
+
+    async function setGoalSaved(owner, id, cents) {
+        own(owner);
+        if (!Number.isSafeInteger(cents) || cents < 0) fail(422, 'finance.goal.saved', 'An amount saved is a number.');
+        const n = await db.exec('UPDATE finance_goals SET saved_cents = $3, updated_at = now() WHERE id = $1 AND owner = $2', [String(id || ''), owner, cents]);
+        if (!n) fail(404, 'finance.goal.not_found', 'No such goal of yours.');
+    }
+
+    async function removeGoal(owner, id) {
+        own(owner);
+        await db.exec('DELETE FROM finance_goals WHERE id = $1 AND owner = $2', [String(id || ''), owner]);
+    }
+
+    async function setDebt(owner, accountId, { apr_bps = null, payment_cents = null } = {}) {
+        own(owner);
+        const acc = await db.maybe('SELECT id, kind FROM finance_accounts WHERE id = $1 AND owner = $2 AND archived_at IS NULL', [String(accountId || ''), owner]);
+        if (!acc) fail(404, 'finance.account.not_found', 'No such account of yours.');
+        if (!['loan', 'credit'].includes(acc.kind)) fail(422, 'finance.debt.kind', 'Only a loan or a credit card has a rate and a payment.');
+        if (apr_bps != null && (!Number.isInteger(apr_bps) || apr_bps < 0 || apr_bps > 10000)) fail(422, 'finance.debt.rate', 'A yearly rate is between 0% and 100%.');
+        if (payment_cents != null && (!Number.isSafeInteger(payment_cents) || payment_cents <= 0)) fail(422, 'finance.debt.payment', 'A monthly payment is an amount of money.');
+        await db.exec('UPDATE finance_accounts SET apr_bps = $3, payment_cents = $4, updated_at = now() WHERE id = $1 AND owner = $2', [acc.id, owner, apr_bps, payment_cents]);
+    }
+
     async function exportAll(owner) {
         own(owner);
-        const accs = await db.many('SELECT id, name, kind, currency, opening_cents, created_at, archived_at FROM finance_accounts WHERE owner = $1 ORDER BY created_at', [owner]);
+        const accs = await db.many('SELECT id, name, kind, currency, opening_cents, apr_bps, payment_cents, created_at, archived_at FROM finance_accounts WHERE owner = $1 ORDER BY created_at', [owner]);
         const txns = await db.many('SELECT * FROM finance_transactions WHERE owner = $1 ORDER BY posted_on, created_at', [owner]);
         return {
             exported_at: new Date().toISOString(), format: 'openvibe.finance.export@1',
@@ -267,6 +319,7 @@ function createStore({ db, vault }) {
             transactions: txns.map((r) => open(owner, r)),
             rules: (await rules(owner)).map((r) => ({ match: r.match, category: r.category })),
             budgets: await budgets(owner),
+            goals: (await goals(owner)).map(({ have_cents, ...g }) => g),
         };
     }
 
@@ -277,11 +330,12 @@ function createStore({ db, vault }) {
             await t.exec('DELETE FROM finance_imports WHERE owner = $1', [owner]);
             await t.exec('DELETE FROM finance_rules WHERE owner = $1', [owner]);
             await t.exec('DELETE FROM finance_budgets WHERE owner = $1', [owner]);
+            await t.exec('DELETE FROM finance_goals WHERE owner = $1', [owner]);
             await t.exec('DELETE FROM finance_accounts WHERE owner = $1', [owner]);
         });
     }
 
-    return { recent, accounts, account, addAccount, transactions, addTransaction, setCategory, removeTransaction, importRows, month, rules, addRule, removeRule, applyRules, budgets, setBudget, exportAll, removeAll };
+    return { recent, accounts, account, addAccount, transactions, addTransaction, setCategory, removeTransaction, importRows, month, rules, addRule, removeRule, applyRules, budgets, setBudget, goals, addGoal, setGoalSaved, removeGoal, setDebt, exportAll, removeAll };
 }
 
 module.exports = { createStore, FinanceError, KINDS, CATEGORIES, matchable };

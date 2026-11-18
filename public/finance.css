@@ -111,3 +111,22 @@ html[data-ov-motion="off"] .fin-btn:active, html[data-ov-motion="off"] .fin-acco
 .fin-bar-sum { display: grid; justify-items: end; gap: 1px; }
 .fin-bar-sum small { color: var(--text-secondary, #9aa4b2); font-size: 12px; }
 .fin-budget-sum { margin: 0 0 10px; color: var(--text-secondary, #9aa4b2); font-variant-numeric: tabular-nums; }
+/* Goals and debt (v0.6). */
+.fin-goals { list-style: none; padding: 0; margin: 0 0 10px; display: grid; gap: 10px; }
+.fin-goal { display: grid; gap: 8px; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--border, #1f2937); }
+.fin-goal-top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.fin-goal-top span { font-variant-numeric: tabular-nums; color: var(--text-secondary, #9aa4b2); }
+.fin-goal-top a { color: inherit; }
+.fin-goal.is-done .fin-bar > span { background: var(--success, #22c55e); }
+.fin-goal-note { margin: 0; color: var(--text-secondary, #9aa4b2); font-size: 14px; line-height: 1.45; }
+.fin-goal-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.fin-goal-tools .fin-mini, .fin-goal-tools input { min-height: 44px; }
+.fin-goal-remove { margin-left: auto; }
+.fin-mini--quiet { border-color: transparent; }
+.fin-saved { display: flex; align-items: center; gap: 8px; color: var(--text-secondary, #9aa4b2); font-size: 14px; }
+.fin-saved input { width: 7.5em; font-variant-numeric: tabular-nums; }
+.fin-goal-tip { margin: 0; padding: 8px 12px; border-radius: 10px; background: color-mix(in srgb, var(--success, #22c55e) 10%, transparent); color: var(--text, #e8ecf3); font-size: 14px; line-height: 1.45; }
+.fin-fold--quiet { margin: 0; border: 0; padding: 0; background: none; }
+.fin-fold--quiet > summary { min-height: 44px; display: flex; align-items: center; padding: 0; font-weight: 500; color: var(--text-secondary, #9aa4b2); font-size: 14px; }
+.fin-debt { align-items: end; }
+.fin-debt p { margin: 0; }
