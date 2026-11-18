@@ -193,3 +193,12 @@ html[data-ov-motion="off"] .fin-pick input, html[data-ov-motion="off"] .fin-pick
 .fin-pick input:not(:checked) ~ span { opacity: .45; text-decoration: line-through; }
 .fin-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 @media (max-width: 480px) { .fin-pick label { grid-template-columns: auto minmax(0, 1fr) auto; } .fin-pick-date { grid-column: 2; grid-row: 2; } .fin-pick-payee { grid-column: 2; grid-row: 1; } .fin-pick-amount { grid-column: 3; grid-row: 1 / span 2; } }
+/* A receipt photo (v0.12). */
+.fin-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.fin-receipt { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 10px 0 4px; }
+.fin-receipt-btn { position: relative; }
+.fin-receipt-said { color: var(--text-secondary, #9aa4b2); font-size: 14px; }
+.fin-receipt.is-busy .fin-receipt-btn { opacity: .6; pointer-events: none; }
+.fin-receipt.is-busy .fin-receipt-said { color: var(--text, #e8ecf3); animation: fin-pulse 1.2s ease-in-out infinite; }
+html[data-ov-motion="off"] .fin-receipt.is-busy .fin-receipt-said { animation: none; }
+@keyframes fin-pulse { 50% { opacity: .55; } }

@@ -261,6 +261,25 @@ ${error ? `<p class="fin-error" role="alert">${esc(error)}</p>` : ''}${result}${
 <p class="fin-note">Roughly: your average month of the last three, repeated from next month. Money to spend is checking, savings and cash, less what cards owe; investments and loans are left out, as are transfers between your accounts. Nothing here moves money.</p>` });
 }
 
+/** A receipt photo, read: the add form filled in, with what to check (v0.12). Nothing is saved until Add it. */
+function receiptPreview({ account, r, today }) {
+    const check = [!r.found.payee && 'the store', !r.found.date && 'the day', !r.found.total && 'the amount'].filter(Boolean);
+    const cats = `<datalist id="fin-cats">${CATEGORIES.map((c) => `<option value="${esc(c)}">`).join('')}</datalist>`;
+    return page({
+        title: 'Check the receipt', path: `/accounts/${account.id}`, body: `
+<header class="fin-head"><p class="fin-crumb"><a href="/accounts/${esc(account.id)}">${esc(account.name)}</a></p><h1>Check the receipt</h1>
+<p class="fin-sub">${check.length ? `Read from your photo. Check ${check.join(' and ')}: ${check.length === 1 ? 'it was' : 'they were'} not clear.` : 'Read from your photo. Check it, then add it.'}</p></header>${cats}
+<form class="fin-form" method="post" action="/accounts/${esc(account.id)}/transactions">
+<div class="fin-row"><label class="fin-field"><span>Date</span><input type="date" name="posted_on" value="${esc(r.posted_on)}" max="${esc(today)}" required></label>
+<label class="fin-field"><span>Amount</span><input name="amount" inputmode="decimal" required value="${r.amount_cents == null ? '' : (Math.abs(r.amount_cents) / 100).toFixed(2)}" placeholder="12.34" autocomplete="off"${r.found.total ? '' : ' autofocus'}></label></div>
+<input type="hidden" name="direction" value="out">
+<label class="fin-field"><span>Payee</span><input name="payee" maxlength="300" value="${esc(r.payee)}" autocomplete="off"></label>
+<label class="fin-field"><span>Category</span><input name="category" list="fin-cats" maxlength="60" autocomplete="off" placeholder="Groceries"></label>
+<p class="fin-actions"><button class="fin-btn fin-btn--primary" type="submit">Add it</button><a class="fin-btn" href="/accounts/${esc(account.id)}">Cancel</a></p>
+<p class="fin-note">Read on openvibe.finance; the photo was not kept.</p>
+</form>` });
+}
+
 /** A statement PDF's rows to check before importing (v0.11). Nothing is saved until Import. */
 function statementPreview({ account, read, name = '' }) {
     const rows = read.rows;
@@ -313,6 +332,10 @@ function accountPage({ account, balance, txns, month, o = {} }) {
 ${notice(o)}${cats}
 <div class="fin-tools">
 <details class="fin-fold"><summary>Add a transaction</summary>
+<form class="fin-receipt" method="post" action="/accounts/${esc(account.id)}/receipt">
+<input type="hidden" name="image" value="" data-fin-image>
+<label class="fin-btn fin-receipt-btn"><input type="file" accept="image/*" capture="environment" data-fin-receipt class="fin-sr"><span>From a receipt photo</span></label>
+<span class="fin-receipt-said" role="status" data-fin-receipt-said>Read here; the photo is not kept.</span></form>
 <form class="fin-form" method="post" action="/accounts/${esc(account.id)}/transactions">
 <div class="fin-row"><label class="fin-field"><span>Date</span><input type="date" name="posted_on" value="${today}" required></label>
 <label class="fin-field"><span>Amount</span><input name="amount" inputmode="decimal" required placeholder="12.34" autocomplete="off"></label></div>
@@ -391,4 +414,4 @@ ${notice(o)}
 <p><button class="fin-btn fin-btn--danger" type="submit">Delete everything</button></p></form></section>` });
 }
 
-module.exports = { page, welcome, home, accountPage, monthPage, dataPage, rulesPage, billsPage, goalsPage, aheadPage, statementPreview, lineChart, money, esc, monthName };
+module.exports = { page, welcome, home, accountPage, monthPage, dataPage, rulesPage, billsPage, goalsPage, aheadPage, statementPreview, receiptPreview, lineChart, money, esc, monthName };
