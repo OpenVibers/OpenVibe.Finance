@@ -10,7 +10,7 @@ to connect.
 - **No money moves.** It reads and plans; it never pays, transfers or cancels anything.
 - **Yours to take.** Download everything as one JSON file, or delete everything, at `/data`.
 
-## What it does today (v0.6)
+## What it does today (v0.7)
 
 - Accounts (checking, savings, credit card, cash, loan, investments) with an opening balance and a running balance.
 - Transactions typed in, or imported from a bank's download:
@@ -23,6 +23,9 @@ to connect.
 - Category rules: tick **Always** on a transaction's category and every transaction whose payee contains its words
   goes there, past and future imports (never one you categorised yourself). `/rules` lists and removes them.
 - The month: money in, money out, and spending by category (transfers between your accounts left out).
+- Net worth and what if: net worth at each month's end since the data starts; the average month of the last three
+  repeated a year ahead, with a one-off cost ("can I afford it?": yes, or not yet and the month it would fit) or a
+  monthly change ("what if rent rises?"), against the goals' monthly need.
 - Goals: an amount to reach, by a date or not, tracking a savings account or an amount kept by hand; the page says
   what a month reaches it in time.
 - Debt: a loan's or card's yearly rate and monthly payment give when it is paid off, the interest it costs, and what
@@ -33,7 +36,7 @@ to connect.
   amount at a steady rhythm, three times or more): what each costs a month, when the next is due, and which stopped.
 - A JSON API for all of it (`/api/v1/…`), for the person signed in.
 
-Plan: `OpenVibe_Plan_2026-11-13.md` §L.2. Next: scenarios, the Link plugin
+Plan: `OpenVibe_Plan_2026-11-13.md` §L.2. Next: the Link plugin
 for local-only import, and Finance Experts (Budget Coach, Subscription Auditor) with narrow read permission.
 
 ## Running
