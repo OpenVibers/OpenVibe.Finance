@@ -72,3 +72,8 @@ Production: `/opt/openvibe.finance`, unit `openvibe-finance.service` (port 5292)
 (`.env.example`), nginx `deploy/nginx/openvibe.finance.conf`. Sign-in is OpenVibe.Network's OAuth client `finance`.
 
 License: AGPL-3.0-only.
+
+<!-- versions:start -->
+- openvibe-sdk: v0.187.0
+- openvibe-shared: v4.316.0
+<!-- versions:end -->
