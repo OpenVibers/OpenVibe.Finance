@@ -62,7 +62,9 @@ function createApp({ db, vault, auth, baseUrl = 'https://openvibe.finance', now 
     const monthOf = (q) => (/^\d{4}-(0[1-9]|1[0-2])$/.test(String(q || '')) ? String(q) : thisMonth());
     const said = (q) => {
         if (q.imported) { const [a, s] = String(q.imported).split(','); return `Imported ${Number(a) || 0} new transaction${Number(a) === 1 ? '' : 's'}${Number(s) ? `; ${Number(s)} already here` : ''}.`; }
+        if (q.ruled != null) return `Rule made. It also put ${Number(q.ruled) || 0} earlier transaction${Number(q.ruled) === 1 ? '' : 's'} in that category.`;
         if (q.added) return 'Added.';
+        if (q.removed) return 'Rule removed. What it categorised stays as it is.';
         if (q.deleted) return 'Everything is deleted.';
         return '';
     };
@@ -117,12 +119,26 @@ function createApp({ db, vault, auth, baseUrl = 'https://openvibe.finance', now 
         if (!me) return signIn(req, res);
         if (!sameOrigin(req)) return res.status(403).send('A change must come from openvibe.finance itself.');
         const t = await store.setCategory(me, req.params.id, req.body.category);
-        res.redirect(303, `/accounts/${encodeURIComponent(t.account_id)}?m=${t.posted_on.slice(0, 7)}`);
+        let ruled = '';
+        if (req.body.always === 'yes' && t.payee && t.category !== 'Uncategorized') ruled = `&ruled=${(await store.addRule(me, { match: t.payee, category: t.category })).applied}`;
+        res.redirect(303, `/accounts/${encodeURIComponent(t.account_id)}?m=${t.posted_on.slice(0, 7)}${ruled}`);
     }));
     app.get('/month', handle(async (req, res) => {
         const me = who(req);
         if (!me) return signIn(req, res);
         res.send(v.monthPage({ m: await store.month(me, monthOf(req.query.m)) }));
+    }));
+    app.get('/rules', handle(async (req, res) => {
+        const me = who(req);
+        if (!me) return signIn(req, res);
+        res.send(v.rulesPage({ rules: await store.rules(me), o: { said: said(req.query) } }));
+    }));
+    app.post('/rules/:id/delete', form, handle(async (req, res) => {
+        const me = who(req);
+        if (!me) return signIn(req, res);
+        if (!sameOrigin(req)) return res.status(403).send('A change must come from openvibe.finance itself.');
+        await store.removeRule(me, req.params.id);
+        res.redirect(303, '/rules?removed=1');
     }));
     app.get('/data', handle(async (req, res) => {
         if (!who(req)) return signIn(req, res);
@@ -159,6 +175,9 @@ function createApp({ db, vault, auth, baseUrl = 'https://openvibe.finance', now 
         res.status(201).json({ ...(await store.importRows(who(req), req.params.id, read.rows)), unreadable: read.skipped.slice(0, 50) });
     }));
     api.get('/months/:m', handle(async (req, res) => res.json(await store.month(who(req), req.params.m))));
+    api.get('/rules', handle(async (req, res) => res.json({ rules: await store.rules(who(req)) })));
+    api.post('/rules', express.json({ limit: '4kb' }), handle(async (req, res) => res.status(201).json(await store.addRule(who(req), req.body || {}))));
+    api.delete('/rules/:id', handle(async (req, res) => { await store.removeRule(who(req), req.params.id); res.status(204).end(); }));
     api.get('/export', handle(async (req, res) => res.json(await store.exportAll(who(req)))));
     app.use('/api/v1', api);
 

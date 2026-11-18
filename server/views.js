@@ -69,7 +69,18 @@ ${accounts.length ? `<section class="fin-month-card" aria-label="${esc(monthName
 <label class="fin-field"><span>Balance before the first transaction</span><input name="opening" inputmode="decimal" placeholder="0.00" autocomplete="off"></label></div>
 <p><button class="fin-btn fin-btn--primary" type="submit">Add the account</button></p>
 </form></details>
-<p class="fin-foot"><a href="/data">Your data: download or delete everything</a></p>` });
+<p class="fin-foot"><a href="/rules">Your category rules</a> · <a href="/data">Your data: download or delete everything</a></p>` });
+}
+
+function rulesPage({ rules, o = {} }) {
+    return page({
+        title: 'Your category rules', path: '/rules', body: `
+<header class="fin-head"><p class="fin-crumb"><a href="/">Your money</a></p><h1>Your category rules</h1></header>
+${notice(o)}
+<p class="fin-note">A rule puts every transaction whose payee contains its words in its category: the ones nobody has categorised yet, and every import from now on. A category you set yourself stays yours. Make one by ticking <b>Always</b> when you change a transaction's category.</p>
+${rules.length ? `<ul class="fin-rules">${rules.map((r) => `<li><span class="fin-rule-what"><b>${esc(r.match)}</b><span>→ ${esc(r.category)}</span></span>
+<form method="post" action="/rules/${esc(r.id)}/delete"><button type="submit" class="fin-mini">Remove</button></form></li>`).join('')}</ul>`
+        : '<p class="fin-empty">No rules yet.</p>'}` });
 }
 
 function accountPage({ account, balance, txns, month, o = {} }) {
@@ -78,7 +89,7 @@ function accountPage({ account, balance, txns, month, o = {} }) {
     const cats = `<datalist id="fin-cats">${CATEGORIES.map((c) => `<option value="${esc(c)}">`).join('')}</datalist>`;
     const row = (t) => `<li class="fin-txn"><span class="fin-txn-date">${esc(t.posted_on.slice(5))}</span>
 <span class="fin-txn-what"><b>${esc(t.payee || 'No payee')}</b>${t.memo ? `<small>${esc(t.memo)}</small>` : ''}
-<form class="fin-cat" method="post" action="/transactions/${esc(t.id)}/category"><input name="category" list="fin-cats" value="${esc(t.category)}" aria-label="Category" maxlength="60"><button type="submit" class="fin-mini">Save</button></form></span>
+<form class="fin-cat" method="post" action="/transactions/${esc(t.id)}/category"><input name="category" list="fin-cats" value="${esc(t.category)}" aria-label="Category" maxlength="60">${t.payee ? `<label class="fin-always" title="Every transaction from ${esc(t.payee)} goes here, now and in future imports"><input type="checkbox" name="always" value="yes"><span>Always</span></label>` : ''}<button type="submit" class="fin-mini">Save</button></form>${t.category_from === 'rule' ? '<small class="fin-by-rule">by a rule</small>' : ''}</span>
 <span class="fin-txn-amount${t.amount_cents < 0 ? ' is-neg' : ' is-pos'}">${esc(money(t.amount_cents, account.currency))}</span></li>`;
     const today = new Date().toISOString().slice(0, 10);
     return page({
@@ -137,4 +148,4 @@ ${notice(o)}
 <p><button class="fin-btn fin-btn--danger" type="submit">Delete everything</button></p></form></section>` });
 }
 
-module.exports = { page, welcome, home, accountPage, monthPage, dataPage, money, esc, monthName };
+module.exports = { page, welcome, home, accountPage, monthPage, dataPage, rulesPage, money, esc, monthName };
