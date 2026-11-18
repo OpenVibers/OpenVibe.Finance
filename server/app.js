@@ -14,6 +14,9 @@ const express = require('express');
 const path = require('node:path');
 const { createStore, FinanceError } = require('./store');
 const { readCsv, readAmount } = require('./csv');
+const { isOfx, readOfx } = require('./ofx');
+/** A bank's export, whichever it is: OFX or QFX by its header, else CSV. */
+const readExport = (text) => (isOfx(text) ? readOfx(text) : readCsv(text));
 const { findRecurring } = require('./recurring');
 const v = require('./views');
 
@@ -111,7 +114,7 @@ function createApp({ db, vault, auth, baseUrl = 'https://openvibe.finance', now 
         const me = who(req);
         if (!me) return signIn(req, res);
         if (!sameOrigin(req)) return res.status(403).send('A change must come from openvibe.finance itself.');
-        const read = readCsv(req.body.csv);
+        const read = readExport(req.body.csv);
         if (read.problem) throw new FinanceError(422, 'finance.import.unreadable', read.problem);
         const out = await store.importRows(me, req.params.id, read.rows);
         const latest = read.rows.map((r) => r.posted_on).sort().pop();
@@ -189,8 +192,8 @@ function createApp({ db, vault, auth, baseUrl = 'https://openvibe.finance', now 
         res.json({ transactions: await store.transactions(who(req), req.params.id, { month: req.query.m ? String(req.query.m) : null }) });
     }));
     api.post('/accounts/:id/transactions', express.json({ limit: '16kb' }), handle(async (req, res) => res.status(201).json(await store.addTransaction(who(req), req.params.id, req.body || {}))));
-    api.post('/accounts/:id/import', express.text({ type: ['text/csv', 'text/plain'], limit: '4mb' }), handle(async (req, res) => {
-        const read = readCsv(typeof req.body === 'string' ? req.body : '');
+    api.post('/accounts/:id/import', express.text({ type: ['text/csv', 'text/plain', 'application/x-ofx', 'application/vnd.intu.qfx', 'application/ofx'], limit: '4mb' }), handle(async (req, res) => {
+        const read = readExport(typeof req.body === 'string' ? req.body : '');
         if (read.problem) throw new FinanceError(422, 'finance.import.unreadable', read.problem);
         res.status(201).json({ ...(await store.importRows(who(req), req.params.id, read.rows)), unreadable: read.skipped.slice(0, 50) });
     }));

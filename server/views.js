@@ -35,7 +35,7 @@ function welcome() {
         title: 'Your money, your rules, your data', robots: 'index, follow', body: `
 <section class="fin-hero">
 <h1>Your money, your rules, your data</h1>
-<p class="fin-lede">Your accounts in one place, from a bank's CSV export or typed in, and a clear picture of each month. Free, with nothing to connect.</p>
+<p class="fin-lede">Your accounts in one place, from your bank's download (CSV, OFX or QFX) or typed in, and a clear picture of each month. Free, with nothing to connect.</p>
 <p><a class="fin-btn fin-btn--primary" href="/auth/login?next=%2F">Sign in to start</a></p>
 </section>
 <ul class="fin-promises">
@@ -60,7 +60,7 @@ ${accounts.length ? `<section class="fin-month-card" aria-label="${esc(monthName
 <ul class="fin-accounts">${accounts.map((a) => `<li><a class="fin-account" href="/accounts/${esc(a.id)}">
 <span class="fin-account-name">${esc(a.name)}<small>${esc(KIND_WORDS[a.kind] || a.kind)} · ${a.count} transaction${a.count === 1 ? '' : 's'}</small></span>
 <span class="fin-account-balance${a.balance_cents < 0 ? ' is-neg' : ''}">${esc(money(a.balance_cents, a.currency))}</span></a></li>`).join('')}</ul>`
-        : `<p class="fin-empty">Start with an account: name it, then type in transactions or import your bank's CSV export.</p>`}
+        : `<p class="fin-empty">Start with an account: name it, then type in transactions or import your bank's download (CSV, OFX or QFX).</p>`}
 <details class="fin-fold"${accounts.length ? '' : ' open'}><summary>Add an account</summary>
 <form class="fin-form" method="post" action="/accounts">
 <label class="fin-field"><span>Name</span><input name="name" maxlength="80" required placeholder="Everyday checking" autocomplete="off"></label>
@@ -129,17 +129,17 @@ ${notice(o)}${cats}
 <label class="fin-field"><span>Category</span><input name="category" list="fin-cats" maxlength="60" autocomplete="off" placeholder="Groceries"></label>
 <p><button class="fin-btn fin-btn--primary" type="submit">Add it</button></p>
 </form></details>
-<details class="fin-fold"><summary>Import a bank's CSV export</summary>
+<details class="fin-fold"><summary>Import a bank's export (CSV, OFX or QFX)</summary>
 <form class="fin-form" method="post" action="/accounts/${esc(account.id)}/import">
-<p class="fin-note">Most banks export a CSV with a date, an amount (or debit and credit) and a description. Importing the same file twice adds nothing twice.</p>
-<label class="fin-file"><input type="file" accept=".csv,text/csv,text/plain" data-fin-file="csv"><span class="fin-btn">Choose a CSV file</span><span class="fin-file-name" data-fin-file-name>No file chosen yet</span></label>
+<p class="fin-note">Banks offer a download as CSV, OFX or QFX (Quicken). Any of them works; importing the same file twice adds nothing twice.</p>
+<label class="fin-file"><input type="file" accept=".csv,.ofx,.qfx,text/csv,text/plain,application/x-ofx" data-fin-file="csv"><span class="fin-btn">Choose a file</span><span class="fin-file-name" data-fin-file-name>No file chosen yet</span></label>
 <label class="fin-field"><span>Or paste it</span><textarea name="csv" rows="6" required data-fin-csv placeholder="Date,Description,Amount&#10;2026-11-02,Corner Grocer,-23.18"></textarea></label>
 <p><button class="fin-btn fin-btn--primary" type="submit">Import</button></p>
 </form></details>
 </div>
 <nav class="fin-monthnav" aria-label="Month"><a href="/accounts/${esc(account.id)}?m=${shiftMonth(month, -1)}">${esc(monthName(shiftMonth(month, -1)))}</a>
 <b>${esc(monthName(month))}</b><a href="/accounts/${esc(account.id)}?m=${shiftMonth(month, 1)}">${esc(monthName(shiftMonth(month, 1)))}</a></nav>
-${txns.length ? [...groups.values()].map((list) => `<ul class="fin-txns">${list.map(row).join('')}</ul>`).join('') : `<p class="fin-empty">Nothing in ${esc(monthName(month))}. Add a transaction, or import a CSV.</p>`}` });
+${txns.length ? [...groups.values()].map((list) => `<ul class="fin-txns">${list.map(row).join('')}</ul>`).join('') : `<p class="fin-empty">Nothing in ${esc(monthName(month))}. Add a transaction, or import your bank's export.</p>`}` });
 }
 
 function monthPage({ m, budgets = [], o = {} }) {
