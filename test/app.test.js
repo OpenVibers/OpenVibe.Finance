@@ -61,6 +61,11 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             assert.strictEqual(page.status, 200);
             assert.match(page.text, /Everyday checking/);
             assert.match(page.text, /\$1,000\.00/);
+            // With an account, the home page offers the money Experts (Actor #623), which read here only once allowed.
+            const home = await go('/', { as: ADA });
+            assert.match(home.text, /Ask an Expert/);
+            assert.match(home.text, /href="https:\/\/openvibe\.actor\/experts\/bp_can_i_afford_it"/);
+            assert.match(home.text, /allow Actor in OpenVibe Finance on your <a href="https:\/\/openvibe\.network\/apps">Apps page<\/a>/);
         });
 
         await check('a typed transaction: money out by default, its payee sealed in the database', async () => {

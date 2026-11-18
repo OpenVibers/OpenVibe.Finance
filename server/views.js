@@ -46,6 +46,18 @@ function welcome() {
 </ul>` });
 }
 
+// OpenVibe's money Experts on Actor (Actor #623): they read your numbers here through /mcp, as you, once you allow
+// Actor in OpenVibe Finance on your Apps page; none moves money.
+const EXPERTS = [
+    { id: 'bp_budget_coach', name: 'Budget coach', what: 'A budget you can live with, from your real month.' },
+    { id: 'bp_can_i_afford_it', name: 'Can I afford it?', what: 'Yes, not yet or no, for a purchase or a new monthly cost.' },
+    { id: 'bp_debt_planner', name: 'Debt planner', what: 'The fastest and the cheapest way out of your loans and cards.' },
+    { id: 'bp_subscription_auditor', name: 'Subscription auditor', what: 'Every recurring charge, and what dropping each saves.' },
+];
+const expertsSection = () => `<section class="fin-sec fin-experts" aria-labelledby="fin-experts-h"><h2 id="fin-experts-h">Ask an Expert</h2>
+<ul class="fin-expert-list">${EXPERTS.map((e) => `<li><a class="fin-expert" href="https://openvibe.actor/experts/${e.id}"><b>${esc(e.name)}</b><span>${esc(e.what)}</span></a></li>`).join('')}</ul>
+<p class="fin-note">They read your numbers here as you once you allow Actor in OpenVibe Finance on your <a href="https://openvibe.network/apps">Apps page</a>, and only to read: nothing here moves money.</p></section>`;
+
 function home({ accounts, month, o = {} }) {
     const total = {};
     for (const a of accounts) total[a.currency] = (total[a.currency] || 0) + a.balance_cents;
@@ -70,6 +82,7 @@ ${accounts.length ? `<section class="fin-month-card" aria-label="${esc(monthName
 <label class="fin-field"><span>Balance before the first transaction</span><input name="opening" inputmode="decimal" placeholder="0.00" autocomplete="off"></label></div>
 <p><button class="fin-btn fin-btn--primary" type="submit">Add the account</button></p>
 </form></details>
+${accounts.length ? expertsSection() : ''}
 <p class="fin-foot"><a href="/ahead">Net worth and what if</a> · <a href="/goals">Goals and debt</a> · <a href="/bills">Recurring bills</a> · <a href="/rules">Your category rules</a> · <a href="/data">Your data: download or delete everything</a></p>` });
 }
 
