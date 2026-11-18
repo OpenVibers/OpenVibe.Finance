@@ -27,10 +27,10 @@ const BO = 'usr_01JCZ3NDEKTSV4RRFFQ69G5FAX';
         if (u) req.user = req.get('x-test-delegated') ? { subject_id: u, typ: 'delegated', delegated: { by: 'key_1', scope: 'read', services: ['finance'] } } : { subject_id: u };
         next();
     } };
-    // /mcp's sign-in: "Bearer person:<subject>" or "Bearer delegated:<subject>"; anything else is nobody.
+    // /mcp's sign-in: "Bearer person:<subject>", "Bearer delegated:<subject>" (a read grant) or "Bearer delegated-write:<subject>".
     const mcpAuth = { optionalAuth: () => (req, _res, next) => {
-        const m = /^Bearer (person|delegated):(\S+)$/.exec(String(req.get('authorization') || ''));
-        if (m) req.user = m[1] === 'delegated' ? { subject_id: m[2], typ: 'delegated', delegated: { by: 'key_1', scope: 'read', services: ['finance'] } } : { subject_id: m[2] };
+        const m = /^Bearer (person|delegated|delegated-write):(\S+)$/.exec(String(req.get('authorization') || ''));
+        if (m) req.user = m[1] === 'person' ? { subject_id: m[2] } : { subject_id: m[2], typ: 'delegated', delegated: { by: 'key_1', scope: m[1] === 'delegated-write' ? 'write' : 'read', services: ['finance'] } };
         next();
     } };
     const server = createApp({ db, vault, auth, mcpAuth, now: () => new Date('2026-11-18T12:00:00Z') }).listen(0, '127.0.0.1');
@@ -65,8 +65,10 @@ const BO = 'usr_01JCZ3NDEKTSV4RRFFQ69G5FAX';
         assert.strictEqual(note.status, 202, 'a notification is accepted with nothing to say');
         r = await rpc('tools/list');
         const names = r.body.result.tools.map((t) => t.name);
-        assert.deepStrictEqual(names, ['accounts', 'month', 'transactions', 'recurring', 'goals', 'net_worth', 'what_if'], 'anyone may list them');
-        assert.ok(r.body.result.tools.every((t) => t.annotations.readOnlyHint === true && t.annotations.destructiveHint === false), 'every tool is read only');
+        assert.deepStrictEqual(names, ['accounts', 'month', 'transactions', 'recurring', 'goals', 'net_worth', 'what_if', 'import_statement', 'add_transaction', 'categorize', 'add_rule'], 'anyone may list them');
+        const reads = r.body.result.tools.filter((t) => t.annotations.readOnlyHint === true).map((t) => t.name);
+        assert.deepStrictEqual(reads, names.slice(0, 7), 'seven read; four write (Network lists those only for a write grant)');
+        assert.ok(r.body.result.tools.every((t) => t.annotations.destructiveHint === false), 'nothing deletes or moves money');
 
         // Nobody, or a cookie-style sign-in, is not a person here.
         assert.match((await call('accounts', {}, null)).content[0].text, /connect OpenVibe Finance/);
@@ -115,7 +117,7 @@ const BO = 'usr_01JCZ3NDEKTSV4RRFFQ69G5FAX';
         assert.ok(r.body.result.supportedVersions.includes('2026-07-28'));
         r = await modern('tools/list', {});
         assert.strictEqual(r.body.result.resultType, 'complete');
-        assert.strictEqual(r.body.result.tools.length, 7);
+        assert.strictEqual(r.body.result.tools.length, 11);
         r = await modern('tools/call', { name: 'accounts', arguments: {} }, `Bearer delegated:${ADA}`);
         assert.strictEqual(r.body.result.resultType, 'complete');
         assert.strictEqual(r.body.result.structuredContent.accounts.length, 2);
@@ -123,6 +125,49 @@ const BO = 'usr_01JCZ3NDEKTSV4RRFFQ69G5FAX';
         assert.strictEqual(lie.status, 400, 'headers that disagree with the body are refused');
         r = await modern('resources/list', {});
         assert.strictEqual(r.status, 404);
+
+        // ── Writing (v0.10): only with a write grant (or the person's own sign-in) ──
+        const OFX = '<OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS><CURDEF>USD<BANKTRANLIST>'
+            + '<STMTTRN><TRNTYPE>DEBIT<DTPOSTED>20261112<TRNAMT>-42.10<FITID>F-1<NAME>CORNER GROCER</STMTTRN>'
+            + '<STMTTRN><TRNTYPE>DEBIT<DTPOSTED>20261113<TRNAMT>-9.99<FITID>F-2<NAME>MOVIE PASS 4421</STMTTRN>'
+            + '</BANKTRANLIST></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>';
+        out = await call('import_statement', { account_id: checking.id, text: OFX });
+        assert.strictEqual(out.isError, true, 'a read grant may not write');
+        assert.match(out.content[0].text, /may only read: give it read and write in OpenVibe Finance/);
+        const W = `delegated-write:${ADA}`;
+        out = await call('import_statement', { account_id: checking.id, text: OFX }, W);
+        assert.deepStrictEqual(out.structuredContent, { added: 2, already_there: 0, unreadable_lines: 0 });
+        out = await call('import_statement', { account_id: checking.id, text: OFX }, W);
+        assert.deepStrictEqual(out.structuredContent, { added: 0, already_there: 2, unreadable_lines: 0 }, 'the same download twice adds nothing');
+        out = await call('import_statement', { account_id: boAcc.id, text: OFX }, W);
+        assert.match(out.content[0].text, /No such account of yours/, 'never another person\'s account');
+        out = await call('import_statement', { account_id: checking.id }, W);
+        assert.match(out.content[0].text, /import_statement needs "text"/);
+
+        const novTx = (await store.transactions(ADA, checking.id, { month: '2026-11' }));
+        const grocer = novTx.find((t) => t.payee === 'CORNER GROCER');
+        const movie = novTx.find((t) => t.payee === 'MOVIE PASS 4421');
+        const rent = novTx.find((t) => t.payee === 'Rent');
+        await store.setCategory(ADA, rent.id, 'Housing');   // the person's own choice
+        out = await call('categorize', { items: [{ transaction_id: grocer.id, category: 'Groceries' }, { transaction_id: rent.id, category: 'Shopping' }, { transaction_id: 'txn_nope', category: 'Fees' }] }, W);
+        assert.deepStrictEqual(out.structuredContent, { changed: 1, kept_yours: 1, not_found: 1 }, 'an agent never overwrites the person\'s own category');
+        const after = await store.transactions(ADA, checking.id, { month: '2026-11' });
+        assert.deepStrictEqual([after.find((t) => t.id === grocer.id).category_from, after.find((t) => t.id === rent.id).category], ['ai', 'Housing']);
+        const acctPage = await fetch(`${base}/accounts/${checking.id}?m=2026-11`, { headers: { 'x-test-user': ADA } }).then((x) => x.text());
+        assert.match(acctPage, /class="fin-by-agent"[^>]*>agent<\/span>/, 'the page marks what an agent set');
+        out = await call('categorize', { items: [{ transaction_id: grocer.id, category: 'Eating out' }] }, `person:${ADA}`);
+        assert.strictEqual((await store.transactions(ADA, checking.id, { month: '2026-11' })).find((t) => t.id === grocer.id).category_from, 'you', 'the person\'s own sign-in sets it as theirs');
+        out = await call('categorize', { items: [] }, W);
+        assert.match(out.content[0].text, /"items" is a list of 1 to 200 items/);
+
+        out = await call('add_rule', { match: 'movie pass', category: 'Subscriptions' }, W);
+        assert.deepStrictEqual(out.structuredContent.rule, { match: 'movie pass', category: 'Subscriptions' });
+        assert.ok(out.structuredContent.applied_now >= 1, 'it applies to what is uncategorised now');
+        assert.strictEqual((await store.transactions(ADA, checking.id, { month: '2026-11' })).find((t) => t.id === movie.id).category, 'Subscriptions');
+        out = await call('add_transaction', { account_id: checking.id, posted_on: '2026-11-17', amount_cents: -1250, payee: 'Bakery', category: 'Eating out' }, W);
+        assert.strictEqual(out.structuredContent.transaction.payee, 'Bakery');
+        out = await call('add_transaction', { account_id: checking.id, posted_on: '17 Nov', amount_cents: -1, payee: 'x' }, W);
+        assert.match(out.content[0].text, /"posted_on" is not right/);
 
         // The pages and the API never take a delegated person.
         const api = await fetch(`${base}/api/v1/accounts`, { headers: { 'x-test-user': ADA, 'x-test-delegated': '1' } });
@@ -134,5 +179,5 @@ const BO = 'usr_01JCZ3NDEKTSV4RRFFQ69G5FAX';
         server.close();
         await close();
     }
-    console.log('mcp: seven read-only tools, Bearer only (delegated included), the person\'s own data, schemas checked, both eras; pages and API refuse delegated');
+    console.log('mcp: seven read-only tools and four that write with a write grant, Bearer only (delegated included), the person\'s own data, schemas checked, both eras; pages and API refuse delegated');
 })().catch((err) => { console.error(err); process.exit(1); });
