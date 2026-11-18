@@ -178,3 +178,18 @@ html[data-ov-motion="off"] .fin-result { animation: none; }
 html[data-ov-motion="off"] .fin-expert { transition: none; }
 /* A category an agent set (v0.10): marked, so it is easy to check and change. */
 .fin-by-agent { flex: none; padding: 2px 8px; border-radius: 999px; font-size: 12px; color: var(--accent, #5b8cff); border: 1px solid color-mix(in srgb, var(--accent, #5b8cff) 45%, transparent); }
+/* A statement PDF's rows to check (v0.11). */
+.fin-picks { list-style: none; padding: 0; margin: 4px 0 12px; display: grid; gap: 6px; }
+.fin-pick label { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; gap: 10px; align-items: center; min-height: 48px; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--border, #1f2937); cursor: pointer; }
+.fin-pick input { appearance: none; -webkit-appearance: none; width: 22px; height: 22px; margin: 0; border-radius: 7px; border: 2px solid var(--border-strong, #334155); display: grid; place-content: center; transition: background .12s ease, border-color .12s ease; }
+.fin-pick input::before { content: ''; width: 11px; height: 11px; clip-path: polygon(14% 52%, 0 66%, 38% 100%, 100% 22%, 86% 8%, 38% 72%); background: var(--accent-contrast, #fff); transform: scale(0); transition: transform .12s ease; }
+.fin-pick input:checked { background: var(--accent, #5b8cff); border-color: var(--accent, #5b8cff); }
+.fin-pick input:checked::before { transform: scale(1); }
+.fin-pick input:focus-visible { outline: 2px solid var(--accent, #5b8cff); outline-offset: 2px; }
+html[data-ov-motion="off"] .fin-pick input, html[data-ov-motion="off"] .fin-pick input::before { transition: none; }
+.fin-pick-date { color: var(--text-secondary, #9aa4b2); font-size: 13px; font-variant-numeric: tabular-nums; }
+.fin-pick-payee { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fin-pick-amount { font-variant-numeric: tabular-nums; }
+.fin-pick input:not(:checked) ~ span { opacity: .45; text-decoration: line-through; }
+.fin-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+@media (max-width: 480px) { .fin-pick label { grid-template-columns: auto minmax(0, 1fr) auto; } .fin-pick-date { grid-column: 2; grid-row: 2; } .fin-pick-payee { grid-column: 2; grid-row: 1; } .fin-pick-amount { grid-column: 3; grid-row: 1 / span 2; } }
