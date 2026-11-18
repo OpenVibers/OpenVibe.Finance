@@ -2,8 +2,10 @@
 /**
  * OpenVibe.Finance (plan §L.2): the pages and the JSON API over one person's accounts and transactions.
  *
- *   createApp({ db, vault, auth, baseUrl }) → an Express app
+ *   createApp({ db, vault, auth, mcpAuth, baseUrl }) → an Express app
  *     auth: openvibe-sdk/sso's client (router, optionalAuth); tests pass a stand-in that sets req.user.
+ *     mcpAuth: a second client that also takes a delegated person token naming finance, used on POST /mcp only
+ *       (server/mcp.js); without it /mcp reads the person from a Bearer token of the ordinary client.
  *
  * Pages: / (signed out: what it is; signed in: your accounts and this month), /accounts/:id (?m=YYYY-MM), /month,
  * /data (download or delete everything). API (JSON, the same person, same rules): /api/v1/accounts,
@@ -22,7 +24,7 @@ const readExport = (text) => (isOfx(text) ? readOfx(text) : readCsv(text));
 const { findRecurring } = require('./recurring');
 const v = require('./views');
 
-function createApp({ db, vault, auth, baseUrl = 'https://openvibe.finance', now = () => new Date() }) {
+function createApp({ db, vault, auth, mcpAuth = null, baseUrl = 'https://openvibe.finance', now = () => new Date() }) {
     const store = createStore({ db, vault });
     const app = express();
     app.disable('x-powered-by');
@@ -44,10 +46,20 @@ function createApp({ db, vault, auth, baseUrl = 'https://openvibe.finance', now 
     app.use(express.static(path.join(__dirname, '..', 'public'), { maxAge: '1h' }));
     app.use('/shared', require('openvibe-shared/serve').handler());
     if (auth) app.use('/auth', auth.router(express));
+    // POST /mcp (server/mcp.js), before the pages' sign-in: a Bearer token only (never a cookie), which may be a
+    // delegated person token for this service (mcpAuth); the pages and the API below never take one.
+    const finMcp = require('./mcp').createMcp({ store, aheadFor: (me, q) => aheadFor(me, q), now });
+    const bearerOnly = (req, _res, next) => { if (!/^Bearer\s+\S/i.test(String(req.get('authorization') || ''))) { delete req.headers.cookie; req.user = undefined; } next(); };
+    const mcpWho = mcpAuth || auth;
+    app.post('/mcp', express.json({ limit: '64kb' }), bearerOnly, (req, res, next) => (mcpWho && /^Bearer\s/i.test(String(req.get('authorization') || '')) ? mcpWho.optionalAuth()(req, res, next) : next()),
+        (req, res, next) => { res.set('Cache-Control', 'private, no-store'); Promise.resolve(finMcp.handler(req, res)).catch(next); });
+    app.all('/mcp', (_req, res) => res.status(405).set('Allow', 'POST').json({ error: 'POST a JSON-RPC request.' }));
     app.use(auth ? auth.optionalAuth() : (_req, _res, next) => next());
     app.use((req, res, next) => { res.set('Cache-Control', 'private, no-store'); next(); });
 
-    const who = (req) => (req.user && /^usr_/.test(String(req.user.subject_id || '')) ? String(req.user.subject_id) : null);
+    // The pages and the API: the person's own sign-in only. A delegated token (something acting for them) is for /mcp.
+    const { isDelegated } = require('openvibe-sdk/auth/delegated');
+    const who = (req) => (req.user && !isDelegated(req.user) && /^usr_/.test(String(req.user.subject_id || '')) ? String(req.user.subject_id) : null);
     const own = new URL(baseUrl).origin;
     const sameOrigin = (req) => {
         if (/^Bearer\s/i.test(String(req.get('authorization') || ''))) return true;
