@@ -14,6 +14,7 @@ const express = require('express');
 const path = require('node:path');
 const { createStore, FinanceError } = require('./store');
 const { readCsv, readAmount } = require('./csv');
+const { findRecurring } = require('./recurring');
 const v = require('./views');
 
 function createApp({ db, vault, auth, baseUrl = 'https://openvibe.finance', now = () => new Date() }) {
@@ -128,6 +129,12 @@ function createApp({ db, vault, auth, baseUrl = 'https://openvibe.finance', now 
         if (!me) return signIn(req, res);
         res.send(v.monthPage({ m: await store.month(me, monthOf(req.query.m)) }));
     }));
+    app.get('/bills', handle(async (req, res) => {
+        const me = who(req);
+        if (!me) return signIn(req, res);
+        const today = now().toISOString().slice(0, 10);
+        res.send(v.billsPage({ found: findRecurring(await store.recent(me), { today }), today }));
+    }));
     app.get('/rules', handle(async (req, res) => {
         const me = who(req);
         if (!me) return signIn(req, res);
@@ -176,6 +183,7 @@ function createApp({ db, vault, auth, baseUrl = 'https://openvibe.finance', now 
     }));
     api.get('/months/:m', handle(async (req, res) => res.json(await store.month(who(req), req.params.m))));
     api.get('/rules', handle(async (req, res) => res.json({ rules: await store.rules(who(req)) })));
+    api.get('/recurring', handle(async (req, res) => res.json({ recurring: findRecurring(await store.recent(who(req)), { today: now().toISOString().slice(0, 10) }).map(({ key, ...r }) => r) })));
     api.post('/rules', express.json({ limit: '4kb' }), handle(async (req, res) => res.status(201).json(await store.addRule(who(req), req.body || {}))));
     api.delete('/rules/:id', handle(async (req, res) => { await store.removeRule(who(req), req.params.id); res.status(204).end(); }));
     api.get('/export', handle(async (req, res) => res.json(await store.exportAll(who(req)))));

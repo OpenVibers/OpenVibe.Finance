@@ -21,7 +21,7 @@ const KIND_WORDS = { checking: 'Checking', savings: 'Savings', credit: 'Credit c
 function page({ title, body, path = '/', description = 'Your money, your rules, your data: accounts, imports and a monthly picture, private to you.', robots = 'noindex, nofollow' }) {
     return shell.page({
         name: 'OpenVibe.Finance', siteName: 'OpenVibe.Finance', title, description, canonical: `${SITE}${path}`, robots,
-        navbar: { service: 'finance', apiBase: 'https://openvibe.network', links: [{ label: 'Money', href: '/' }, { label: 'This month', href: '/month' }] },
+        navbar: { service: 'finance', apiBase: 'https://openvibe.network', links: [{ label: 'Money', href: '/' }, { label: 'This month', href: '/month' }, { label: 'Recurring', href: '/bills' }] },
         footer: { service: 'finance', variant: 'full', mount: '#ov-footer' },
         head: `<link rel="stylesheet" href="${serve.url('kit.css')}"><link rel="stylesheet" href="/finance.css"><script src="/finance.js" defer></script>`,
         body: `<div id="navbar-mount"></div><main id="main" class="ovk-page fin">${body}</main>`,
@@ -69,7 +69,29 @@ ${accounts.length ? `<section class="fin-month-card" aria-label="${esc(monthName
 <label class="fin-field"><span>Balance before the first transaction</span><input name="opening" inputmode="decimal" placeholder="0.00" autocomplete="off"></label></div>
 <p><button class="fin-btn fin-btn--primary" type="submit">Add the account</button></p>
 </form></details>
-<p class="fin-foot"><a href="/rules">Your category rules</a> · <a href="/data">Your data: download or delete everything</a></p>` });
+<p class="fin-foot"><a href="/bills">Recurring bills</a> · <a href="/rules">Your category rules</a> · <a href="/data">Your data: download or delete everything</a></p>` });
+}
+
+const CADENCE_WORDS = { weekly: 'Every week', 'every two weeks': 'Every two weeks', monthly: 'Every month', quarterly: 'Every three months', yearly: 'Every year' };
+const dayName = (iso) => new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+
+function billsPage({ found, today, o = {} }) {
+    const out = found.filter((r) => r.direction === 'out');
+    const income = found.filter((r) => r.direction === 'in');
+    const monthly = out.reduce((n, r) => n + r.monthly_cents, 0);
+    const soon = out.filter((r) => !r.overdue && r.next_on >= today && Date.parse(r.next_on) - Date.parse(today) <= 31 * 86400000);
+    const row = (r) => `<li class="fin-bill${r.overdue ? ' is-late' : ''}"><span class="fin-bill-what"><b>${esc(r.payee)}</b>
+<span>${esc(CADENCE_WORDS[r.cadence] || r.cadence)} · seen ${r.count} times · last ${esc(dayName(r.last_on))}</span></span>
+<span class="fin-bill-when">${r.overdue ? `<small>Expected ${esc(dayName(r.next_on))}: not seen</small>` : `<small>Next ${esc(dayName(r.next_on))}</small>`}<b>${esc(money(r.typical_cents))}</b></span></li>`;
+    return page({
+        title: 'Recurring', path: '/bills', body: `
+<header class="fin-head"><p class="fin-crumb"><a href="/">Your money</a></p><h1>Recurring</h1>
+${out.length ? `<p class="fin-total">About ${esc(money(monthly))} a month</p>` : ''}</header>
+${notice(o)}
+<p class="fin-note">Found in your own transactions: the same payee and a similar amount, at a steady rhythm, at least three times. Nothing here is stored or sent anywhere.</p>
+${soon.length ? `<section class="fin-sec"><h2>The next 31 days</h2><ul class="fin-bills">${soon.map(row).join('')}</ul></section>` : ''}
+<section class="fin-sec"><h2>Bills and subscriptions</h2>${out.length ? `<ul class="fin-bills">${out.map(row).join('')}</ul>` : '<p class="fin-empty">None found yet. A few months of transactions show them.</p>'}</section>
+${income.length ? `<section class="fin-sec"><h2>Money that comes in regularly</h2><ul class="fin-bills">${income.map(row).join('')}</ul></section>` : ''}` });
 }
 
 function rulesPage({ rules, o = {} }) {
@@ -148,4 +170,4 @@ ${notice(o)}
 <p><button class="fin-btn fin-btn--danger" type="submit">Delete everything</button></p></form></section>` });
 }
 
-module.exports = { page, welcome, home, accountPage, monthPage, dataPage, rulesPage, money, esc, monthName };
+module.exports = { page, welcome, home, accountPage, monthPage, dataPage, rulesPage, billsPage, money, esc, monthName };
