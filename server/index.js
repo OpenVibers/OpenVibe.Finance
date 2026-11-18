@@ -21,13 +21,16 @@ async function main() {
     try { await owner.migrate({ dir: path.join(__dirname, '..', 'migrations') }); } finally { await owner.close(); }
     const db = createDb({ url: env.DATABASE_URL, service: 'finance' });
     const vault = createVault(env.FINANCE_DATA_KEY);
-    const auth = env.OV_OAUTH_CLIENT_ID && env.OV_OAUTH_CLIENT_SECRET ? createSsoClient({
+    const sso = (more = {}) => createSsoClient({
         site: 'finance', siteName: 'OpenVibe.Finance', baseUrl, clientId: env.OV_OAUTH_CLIENT_ID, clientSecret: env.OV_OAUTH_CLIENT_SECRET,
         networkUrl: env.OV_NETWORK_URL || 'https://openvibe.network', networkInternalUrl: env.OV_NETWORK_INTERNAL_URL || 'http://127.0.0.1:4000',
-        secureCookies: env.NODE_ENV === 'production',
-    }) : null;
+        secureCookies: env.NODE_ENV === 'production', ...more,
+    });
+    const auth = env.OV_OAUTH_CLIENT_ID && env.OV_OAUTH_CLIENT_SECRET ? sso() : null;
+    // POST /mcp only: also a delegated person token naming finance (SDK 0.187; Network's Connect mints it per call).
+    const mcpAuth = auth ? sso({ delegated: true }) : null;
     if (!auth) console.warn('[finance] no OAuth client: sign-in is off');
-    const server = createApp({ db, vault, auth, baseUrl }).listen(port, '127.0.0.1', () => console.log(`[finance] listening on 127.0.0.1:${port}`));
+    const server = createApp({ db, vault, auth, mcpAuth, baseUrl }).listen(port, '127.0.0.1', () => console.log(`[finance] listening on 127.0.0.1:${port}`));
     process.on('SIGTERM', () => server.close(async () => { try { await db.close(); } finally { process.exit(0); } }));
 }
 

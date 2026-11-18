@@ -10,7 +10,7 @@ to connect.
 - **No money moves.** It reads and plans; it never pays, transfers or cancels anything.
 - **Yours to take.** Download everything as one JSON file, or delete everything, at `/data`.
 
-## What it does today (v0.7)
+## What it does today (v0.8)
 
 - Accounts (checking, savings, credit card, cash, loan, investments) with an opening balance and a running balance.
 - Transactions typed in, or imported from a bank's download:
@@ -38,6 +38,18 @@ to connect.
 
 Plan: `OpenVibe_Plan_2026-11-13.md` §L.2. Next: the Link plugin
 for local-only import, and Finance Experts (Budget Coach, Subscription Auditor) with narrow read permission.
+
+## For agents: /mcp
+
+`POST https://openvibe.finance/mcp` is an MCP server (both eras: the 2026-07-28 stateless protocol and the handshake
+one) with seven tools, every one read only: `accounts`, `month`, `transactions`, `recurring`, `goals`, `net_worth`,
+`what_if`. Amounts are integer cents; months are `YYYY-MM`.
+
+- Anyone may list the tools. A call reads the person from a **Bearer token only**, never a cookie: their own sign-in,
+  or a delegated person token naming `finance` (openvibe-sdk 0.187), which OpenVibe.Network mints per call for a key
+  or an agent with a grant in **OpenVibe Finance** (Connect; `https://connect.openvibe.network/mcp/all`).
+- The pages and the JSON API never take a delegated token: only the person changes anything, and nothing here moves
+  money.
 
 ## Running
 
