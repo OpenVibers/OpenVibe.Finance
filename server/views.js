@@ -72,7 +72,7 @@ const EXPERTS = [
 ];
 const expertsSection = () => `<section class="fin-sec fin-experts" aria-labelledby="fin-experts-h"><h2 id="fin-experts-h">Ask an Expert</h2>
 <ul class="fin-expert-list">${EXPERTS.map((e) => `<li><a class="fin-expert" href="https://openvibe.actor/experts/${e.id}"><b>${esc(e.name)}</b><span>${esc(e.what)}</span></a></li>`).join('')}</ul>
-<p class="fin-note">They read your numbers here as you once you allow Actor in OpenVibe Finance on your <a href="https://openvibe.network/apps">Apps page</a>, and only to read: nothing here moves money.</p></section>`;
+<p class="fin-note">They read your numbers here as you once you allow Actor in OpenVibe Finance on your <a href="https://openvibe.network/apps">Apps page</a>, and only to read: nothing here moves money. To answer, the model you chose in Actor reads the numbers the Expert fetched; take back the permission there at any time.</p></section>`;
 
 function home({ accounts, month, o = {} }) {
     const total = {};

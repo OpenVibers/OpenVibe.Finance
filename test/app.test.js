@@ -67,6 +67,7 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             assert.match(home.text, /Ask an Expert/);
             assert.match(home.text, /href="https:\/\/openvibe\.actor\/experts\/bp_can_i_afford_it"/);
             assert.match(home.text, /allow Actor in OpenVibe Finance on your <a href="https:\/\/openvibe\.network\/apps">Apps page<\/a>/);
+            assert.match(home.text, /the model you chose in Actor reads the numbers the Expert fetched/, 'said plainly which model reads them');
         });
 
         await check('a typed transaction: money out by default, its payee sealed in the database', async () => {
