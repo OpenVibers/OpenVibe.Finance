@@ -15,6 +15,8 @@ const path = require('node:path');
 const { createStore, FinanceError } = require('./store');
 const { readCsv, readAmount } = require('./csv');
 const { isOfx, readOfx } = require('./ofx');
+const ahead = require('./ahead');
+const { perMonth } = require('./plan');
 /** A bank's export, whichever it is: OFX or QFX by its header, else CSV. */
 const readExport = (text) => (isOfx(text) ? readOfx(text) : readCsv(text));
 const { findRecurring } = require('./recurring');
@@ -57,7 +59,8 @@ function createApp({ db, vault, auth, baseUrl = 'https://openvibe.finance', now 
     const form = express.urlencoded({ extended: false, limit: '4mb' });
     const handle = (fn) => async (req, res, next) => {
         try { await fn(req, res); } catch (err) {
-            if (err instanceof FinanceError) return req.path.startsWith('/api/') ? res.status(err.status).json({ error: err.message, code: err.code }) : res.status(err.status).send(v.page({ title: 'Something is wrong', body: `<p class="fin-error" role="alert">${v.esc(err.message)}</p><p><a href="/">Back</a></p>` }));
+            // Under the /api/v1 router req.path is relative to it: the mount (baseUrl) says it is the API.
+            if (err instanceof FinanceError) return `${req.baseUrl}${req.path}`.startsWith('/api/') ? res.status(err.status).json({ error: err.message, code: err.code }) : res.status(err.status).send(v.page({ title: 'Something is wrong', body: `<p class="fin-error" role="alert">${v.esc(err.message)}</p><p><a href="/">Back</a></p>` }));
             next(err);
         }
     };
@@ -141,6 +144,59 @@ function createApp({ db, vault, auth, baseUrl = 'https://openvibe.finance', now 
         if (!me) return signIn(req, res);
         const today = now().toISOString().slice(0, 10);
         res.send(v.billsPage({ found: findRecurring(await store.recent(me), { today }), today }));
+    }));
+    const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+    const addMonths = (m, by) => { const d = new Date(`${m}-01T00:00:00Z`); d.setUTCMonth(d.getUTCMonth() + by); return d.toISOString().slice(0, 7); };
+    /** The question asked (all optional): a one-off cost in a month, a monthly change from a month. → the ask, or throws. */
+    function readAsk(q, months) {
+        const amount = (text, what) => {
+            const t = String(text || '').trim();
+            if (!t) return 0;
+            const c = readAmount(t);
+            if (c == null) throw new FinanceError(422, 'finance.ahead.amount', `${what} is not a number.`);
+            return Math.abs(c);
+        };
+        const when = (text, what) => {
+            const t = String(text || '').trim();
+            if (!t) return null;
+            if (!MONTH_RE.test(t)) throw new FinanceError(422, 'finance.ahead.month', `${what} is a month (YYYY-MM).`);
+            if (t > months[months.length - 1]) throw new FinanceError(422, 'finance.ahead.month', `${what} is within the next twelve months.`);
+            return t < months[0] ? months[0] : t;
+        };
+        const change = amount(q.change, 'The monthly change');
+        return {
+            cost_cents: amount(q.cost, 'The cost'), cost_on: when(q.cost_on, 'When it is paid'),
+            change_cents: q.dir === 'in' ? change : -change, change_from: when(q.from, 'When the change starts'),
+        };
+    }
+    /** Net worth over the last twelve months and the average month repeated over the next twelve, with the ask. */
+    async function aheadFor(me, q = {}) {
+        const today = now().toISOString().slice(0, 10), m = today.slice(0, 7);
+        const next = Array.from({ length: 12 }, (_, i) => addMonths(m, i + 1));
+        const data = await store.ahead(me);
+        // The line starts where the data does (an opening balance is "before the first transaction", not a year ago).
+        const firstMove = data.moves.reduce((lo, x) => (x.month < lo ? x.month : lo), m);
+        const past = Array.from({ length: 12 }, (_, i) => addMonths(m, i - 11)).filter((pm) => pm >= firstMove);
+        const recent = [];
+        for (const pm of [addMonths(m, -3), addMonths(m, -2), addMonths(m, -1)]) recent.push(await store.month(me, pm));
+        const avg = ahead.averageMonth(recent);
+        // What can be spent: checking, savings and cash, less what the cards owe (they are paid from it).
+        const spendable = data.accounts.reduce((n, a) => n + (['checking', 'savings', 'cash'].includes(a.kind) ? a.balance_cents : a.kind === 'credit' ? Math.min(0, a.balance_cents) : 0), 0);
+        let ask = null, error = null;
+        try { ask = readAsk(q, next); } catch (err) { if (!(err instanceof FinanceError)) throw err; error = err.message; }
+        const asked = Boolean(ask && (ask.cost_cents || ask.change_cents));
+        const goalsNeed = (await store.goals(me)).reduce((n, g) => n + (perMonth({ target_cents: g.target_cents, have_cents: g.have_cents, target_on: g.target_on, today }) || 0), 0);
+        return {
+            net_worth: ahead.history({ accounts: data.accounts, moves: data.moves, months: past }),
+            average: avg, spendable_cents: spendable, goals_need_cents: goalsNeed, has_accounts: data.accounts.length > 0,
+            asked, ask, error,
+            plan: avg.months.length ? ahead.whatIf({ start_cents: spendable, income_cents: avg.income_cents, spending_cents: avg.spending_cents, months: next, ...(asked ? ask : {}) }) : null,
+        };
+    }
+    app.get('/ahead', handle(async (req, res) => {
+        const me = who(req);
+        if (!me) return signIn(req, res);
+        res.send(v.aheadPage({ ...(await aheadFor(me, req.query)), q: req.query }));
     }));
     app.get('/goals', handle(async (req, res) => {
         const me = who(req);
@@ -228,6 +284,12 @@ function createApp({ db, vault, auth, baseUrl = 'https://openvibe.finance', now 
     api.get('/rules', handle(async (req, res) => res.json({ rules: await store.rules(who(req)) })));
     api.get('/budgets', handle(async (req, res) => res.json({ budgets: await store.budgets(who(req)) })));
     api.get('/goals', handle(async (req, res) => res.json({ goals: await store.goals(who(req)) })));
+    api.get('/net-worth', handle(async (req, res) => { const a = await aheadFor(who(req)); res.json({ net_worth: a.net_worth }); }));
+    api.get('/what-if', handle(async (req, res) => {
+        const a = await aheadFor(who(req), req.query);
+        if (a.error) throw new FinanceError(422, 'finance.ahead.ask', a.error);
+        res.json({ average: a.average, spendable_cents: a.spendable_cents, goals_need_cents: a.goals_need_cents, ask: a.asked ? a.ask : null, plan: a.plan });
+    }));
     api.post('/goals', express.json({ limit: '4kb' }), handle(async (req, res) => res.status(201).json(await store.addGoal(who(req), req.body || {}))));
     api.put('/budgets/:category', express.json({ limit: '2kb' }), handle(async (req, res) => {
         const cents = req.body && req.body.monthly_cents;

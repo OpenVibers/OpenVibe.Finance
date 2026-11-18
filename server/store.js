@@ -22,6 +22,7 @@
  *   goals(owner)                            → [{ id, name, target_cents, target_on, account_id, saved_cents, have_cents }]
  *   addGoal(owner, { name, target_cents, target_on, account_id, saved_cents }) / setGoalSaved(owner, id, cents) / removeGoal
  *   setDebt(owner, accountId, { apr_bps, payment_cents })   a loan's or card's rate and monthly payment
+ *   ahead(owner)                            → { accounts: [{ id, kind, opening_cents, balance_cents }], moves: [{ account_id, month, cents }] }
  *   exportAll(owner)                        → everything, opened (the person's own copy)
  *   removeAll(owner)                        → everything of theirs deleted
  */
@@ -309,6 +310,21 @@ function createStore({ db, vault }) {
         await db.exec('UPDATE finance_accounts SET apr_bps = $3, payment_cents = $4, updated_at = now() WHERE id = $1 AND owner = $2', [acc.id, owner, apr_bps, payment_cents]);
     }
 
+    /** What net worth over time and the what-if are worked out from (server/ahead.js): no payee is opened. */
+    async function ahead(owner) {
+        own(owner);
+        const accs = await db.many('SELECT id, kind, opening_cents FROM finance_accounts WHERE owner = $1 AND archived_at IS NULL', [owner]);
+        const moves = await db.many(`SELECT t.account_id, to_char(date_trunc('month', t.posted_on), 'YYYY-MM') AS month, SUM(t.amount_cents)::bigint AS cents
+            FROM finance_transactions t JOIN finance_accounts a ON a.id = t.account_id AND a.archived_at IS NULL
+            WHERE t.owner = $1 GROUP BY 1, 2`, [owner]);
+        const moved = new Map();
+        for (const m of moves) moved.set(m.account_id, (moved.get(m.account_id) || 0) + Number(m.cents));
+        return {
+            accounts: accs.map((a) => ({ id: a.id, kind: a.kind, opening_cents: Number(a.opening_cents), balance_cents: Number(a.opening_cents) + (moved.get(a.id) || 0) })),
+            moves: moves.map((m) => ({ account_id: m.account_id, month: m.month, cents: Number(m.cents) })),
+        };
+    }
+
     async function exportAll(owner) {
         own(owner);
         const accs = await db.many('SELECT id, name, kind, currency, opening_cents, apr_bps, payment_cents, created_at, archived_at FROM finance_accounts WHERE owner = $1 ORDER BY created_at', [owner]);
@@ -335,7 +351,7 @@ function createStore({ db, vault }) {
         });
     }
 
-    return { recent, accounts, account, addAccount, transactions, addTransaction, setCategory, removeTransaction, importRows, month, rules, addRule, removeRule, applyRules, budgets, setBudget, goals, addGoal, setGoalSaved, removeGoal, setDebt, exportAll, removeAll };
+    return { recent, accounts, account, addAccount, transactions, addTransaction, setCategory, removeTransaction, importRows, month, rules, addRule, removeRule, applyRules, budgets, setBudget, goals, addGoal, setGoalSaved, removeGoal, setDebt, ahead, exportAll, removeAll };
 }
 
 module.exports = { createStore, FinanceError, KINDS, CATEGORIES, matchable };

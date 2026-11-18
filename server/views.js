@@ -22,7 +22,7 @@ const KIND_WORDS = { checking: 'Checking', savings: 'Savings', credit: 'Credit c
 function page({ title, body, path = '/', description = 'Your money, your rules, your data: accounts, imports and a monthly picture, private to you.', robots = 'noindex, nofollow' }) {
     return shell.page({
         name: 'OpenVibe.Finance', siteName: 'OpenVibe.Finance', title, description, canonical: `${SITE}${path}`, robots,
-        navbar: { service: 'finance', apiBase: 'https://openvibe.network', links: [{ label: 'Money', href: '/' }, { label: 'This month', href: '/month' }, { label: 'Recurring', href: '/bills' }, { label: 'Goals', href: '/goals' }] },
+        navbar: { service: 'finance', apiBase: 'https://openvibe.network', links: [{ label: 'Money', href: '/' }, { label: 'This month', href: '/month' }, { label: 'Recurring', href: '/bills' }, { label: 'Goals', href: '/goals' }, { label: 'What if', href: '/ahead' }] },
         footer: { service: 'finance', variant: 'full', mount: '#ov-footer' },
         head: `<link rel="stylesheet" href="${serve.url('kit.css')}"><link rel="stylesheet" href="/finance.css"><script src="/finance.js" defer></script>`,
         body: `<div id="navbar-mount"></div><main id="main" class="ovk-page fin">${body}</main>`,
@@ -70,7 +70,7 @@ ${accounts.length ? `<section class="fin-month-card" aria-label="${esc(monthName
 <label class="fin-field"><span>Balance before the first transaction</span><input name="opening" inputmode="decimal" placeholder="0.00" autocomplete="off"></label></div>
 <p><button class="fin-btn fin-btn--primary" type="submit">Add the account</button></p>
 </form></details>
-<p class="fin-foot"><a href="/goals">Goals and debt</a> · <a href="/bills">Recurring bills</a> · <a href="/rules">Your category rules</a> · <a href="/data">Your data: download or delete everything</a></p>` });
+<p class="fin-foot"><a href="/ahead">Net worth and what if</a> · <a href="/goals">Goals and debt</a> · <a href="/bills">Recurring bills</a> · <a href="/rules">Your category rules</a> · <a href="/data">Your data: download or delete everything</a></p>` });
 }
 
 const CADENCE_WORDS = { weekly: 'Every week', 'every two weeks': 'Every two weeks', monthly: 'Every month', quarterly: 'Every three months', yearly: 'Every year' };
@@ -151,6 +151,85 @@ ${savings.length ? `<fieldset class="fin-chips"><legend>Its progress is (optiona
 <p><button class="fin-btn fin-btn--primary" type="submit">Add the goal</button></p>
 </form></details></section>
 <section class="fin-sec"><h2>Debt</h2>${debts.length ? `<ul class="fin-goals">${debts.map(debtRow).join('')}</ul>` : '<p class="fin-empty">No loans or credit cards. Add one as an account (its kind: Loan or Credit card) to plan paying it off.</p>'}</section>` });
+}
+
+const shortMonth = (m) => new Date(`${m}-01T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+
+/** A small line chart in the page's own colours: lines [{ cls, points: [cents] }], the zero line when it is crossed. */
+function lineChart(lines, { label, area = false }) {
+    const all = lines.flatMap((l) => l.points);
+    let lo = Math.min(...all), hi = Math.max(...all);
+    if (lo === hi) { lo -= 10000; hi += 10000; }
+    const pad = (hi - lo) * 0.08;
+    lo -= pad; hi += pad;
+    const W = 600, H = 160, n = lines[0].points.length;
+    const x = (i) => (n === 1 ? W / 2 : (i / (n - 1)) * W).toFixed(1);
+    const y = (c) => (H - ((c - lo) / (hi - lo)) * H).toFixed(1);
+    const d = (pts) => pts.map((c, i) => `${i ? 'L' : 'M'}${x(i)},${y(c)}`).join('');
+    const zero = lo < 0 && hi > 0 ? `<line class="fin-zero" x1="0" x2="${W}" y1="${y(0)}" y2="${y(0)}"/>` : '';
+    const fill = area ? `<path class="fin-area" d="${d(lines[0].points)}L${W},${H}L0,${H}Z"/>` : '';
+    return `<svg class="fin-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(label)}">${fill}${zero}${lines.map((l) => `<path class="${l.cls}" d="${d(l.points)}"/>`).join('')}</svg>`;
+}
+
+function aheadPage({ net_worth, average, spendable_cents, goals_need_cents, has_accounts, asked, ask, error, plan, q = {} }) {
+    const last = net_worth[net_worth.length - 1];
+    const first = net_worth.find((p) => p.assets_cents || p.owed_cents) || net_worth[0];
+    const change = last.net_cents - first.net_cents;
+    const worth = !has_accounts ? '<p class="fin-empty">Add an account on <a href="/">Your money</a> to see your net worth.</p>' : `
+<p class="fin-big${last.net_cents < 0 ? ' is-neg' : ''}">${esc(money(last.net_cents))}</p>
+<p class="fin-sub">${esc(money(last.assets_cents))} in your accounts · ${esc(money(last.owed_cents))} owed${first.month !== last.month ? ` · <span class="${change < 0 ? 'is-neg' : 'fin-in'}">${change < 0 ? '−' : '+'}${esc(money(Math.abs(change)))}</span> since ${esc(monthName(first.month))}` : ''}</p>
+${net_worth.length > 1 ? `${lineChart([{ cls: 'fin-line', points: net_worth.map((p) => p.net_cents) }], { label: `Net worth at the end of each month, ${monthName(net_worth[0].month)} to ${monthName(last.month)}`, area: true })}
+<div class="fin-axis"><span>${esc(shortMonth(net_worth[0].month))}</span><span>Now</span></div>` : ''}`;
+
+    const val = (k) => esc(q[k] || '');
+    const months = plan ? plan.now.map((p) => p.month) : [];
+    // When: a row of month chips (the first, "next month", by default), never the browser's month box.
+    const whenChips = (name, legend) => `<div class="fin-when"><span class="fin-when-label" id="fin-when-${name}">${legend}</span><div class="fin-chips fin-chips--scroll" role="radiogroup" aria-labelledby="fin-when-${name}">${months.map((mm, i) => {
+        const on = (q[name] || months[0]) === mm;
+        const label = i === 0 ? 'Next month' : mm.endsWith('-01') || i === 1 ? shortMonth(mm) : new Date(`${mm}-01T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
+        return `<label class="fin-chip"><input type="radio" name="${name}" value="${i === 0 ? '' : mm}"${on ? ' checked' : ''}><span>${esc(label)}</span></label>`;
+    }).join('')}</div></div>`;
+    const dirIn = q.dir === 'in';
+    const form = `<form class="fin-form fin-ask" method="get" action="/ahead">
+<fieldset class="fin-askset"><legend>Can I afford it? A one-off cost</legend>
+<label class="fin-field"><span>Amount</span><input name="cost" inputmode="decimal" placeholder="1,200.00" value="${val('cost')}" autocomplete="off"></label>
+${whenChips('cost_on', 'Paid in')}</fieldset>
+<fieldset class="fin-askset"><legend>What if something changes every month</legend>
+<div class="fin-chips"><label class="fin-chip"><input type="radio" name="dir" value="out"${dirIn ? '' : ' checked'}><span>More going out</span></label><label class="fin-chip"><input type="radio" name="dir" value="in"${dirIn ? ' checked' : ''}><span>More coming in</span></label></div>
+<label class="fin-field"><span>Amount a month</span><input name="change" inputmode="decimal" placeholder="200.00" value="${val('change')}" autocomplete="off"></label>
+${whenChips('from', 'From')}</fieldset>
+<p class="fin-ask-go"><button class="fin-btn fin-btn--primary" type="submit">See what happens</button>${asked ? '<a class="fin-btn" href="/ahead">Start over</a>' : ''}</p>
+</form>`;
+
+    let result = '';
+    if (plan) {
+        const end = plan.with[plan.with.length - 1];
+        let verdict;
+        if (plan.now_below_zero_on) verdict = `<p class="fin-verdict is-no">Your average month spends more than comes in: at this rate the money to spend runs out in ${esc(monthName(plan.now_below_zero_on))}.</p>`;
+        else if (!asked) verdict = `<p class="fin-verdict">At your average month you have about <b>${esc(money(end.cents))}</b> to spend in ${esc(monthName(end.month))}.</p>`;
+        else if (plan.below_zero_on) verdict = `<p class="fin-verdict is-no">Not yet: it takes you below zero in ${esc(monthName(plan.below_zero_on))} (lowest ${esc(money(plan.lowest.cents))}).${plan.afford_by ? ` At your average month you could pay it in <b>${esc(monthName(plan.afford_by))}</b> and stay above zero.` : ''}</p>`;
+        else verdict = `<p class="fin-verdict is-yes">Yes. The lowest it gets is <b>${esc(money(plan.lowest.cents))}</b>, in ${esc(monthName(plan.lowest.month))}; about ${esc(money(end.cents))} in ${esc(monthName(end.month))}.</p>`;
+        const changeLine = asked && ask.change_cents ? `<p class="fin-sub">Left over each month: ${esc(money(plan.left_now_cents))} now, <b>${esc(money(plan.left_with_cents))}</b> with the change.</p>` : '';
+        const goalsLine = goals_need_cents ? `<p class="fin-sub">Your goals with dates need ${esc(money(goals_need_cents))} a month${plan.left_with_cents < goals_need_cents ? `: ${asked ? 'this leaves' : 'your average month leaves'} less than that (<a href="/goals">Goals</a>).` : '.'}</p>` : '';
+        const lines = asked ? [{ cls: 'fin-line fin-line--now', points: [spendable_cents, ...plan.now.map((p) => p.cents)] }, { cls: 'fin-line', points: [spendable_cents, ...plan.with.map((p) => p.cents)] }]
+            : [{ cls: 'fin-line', points: [spendable_cents, ...plan.now.map((p) => p.cents)] }];
+        result = `<div class="fin-result" aria-live="polite">${verdict}${changeLine}${goalsLine}
+${lineChart(lines, { label: `Money to spend at the end of each month, now to ${monthName(end.month)}` })}
+<div class="fin-axis"><span>Now</span><span>${esc(shortMonth(end.month))}</span></div>
+${asked ? '<p class="fin-legend"><span class="fin-key fin-key--now">As things are</span><span class="fin-key">With the change</span></p>' : ''}
+<details class="fin-fold fin-fold--quiet"><summary>Month by month</summary><div class="fin-table-wrap"><table class="fin-table"><thead><tr><th>End of</th><th>${asked ? 'As things are' : 'To spend'}</th>${asked ? '<th>With the change</th>' : ''}</tr></thead><tbody>
+${plan.now.map((p, i) => `<tr><td>${esc(shortMonth(p.month))}</td><td class="${p.cents < 0 ? 'is-neg' : ''}">${esc(money(p.cents))}</td>${asked ? `<td class="${plan.with[i].cents < 0 ? 'is-neg' : ''}">${esc(money(plan.with[i].cents))}</td>` : ''}</tr>`).join('')}
+</tbody></table></div></details></div>`;
+    }
+    const base = average.months.length ? `<p class="fin-sub">Your average month (${esc(average.months.length === 1 ? monthName(average.months[0]) : `${shortMonth(average.months[0])} to ${shortMonth(average.months[average.months.length - 1])}`)}): ${esc(money(average.income_cents))} in, ${esc(money(average.spending_cents))} out, <b>${esc(money(average.income_cents - average.spending_cents))}</b> left over. ${esc(money(spendable_cents))} to spend now.</p>`
+        : '<p class="fin-empty">A month or two of transactions (the months before this one) shows what is ahead.</p>';
+    return page({
+        title: 'Net worth and what if', path: '/ahead', body: `
+<header class="fin-head"><p class="fin-crumb"><a href="/">Your money</a></p><h1>Net worth and what if</h1></header>
+<section class="fin-sec"><h2>Net worth</h2>${worth}</section>
+<section class="fin-sec"><h2>What if</h2>${base}
+${error ? `<p class="fin-error" role="alert">${esc(error)}</p>` : ''}${result}${average.months.length ? form : ''}</section>
+<p class="fin-note">Roughly: your average month of the last three, repeated from next month. Money to spend is checking, savings and cash, less what cards owe; investments and loans are left out, as are transfers between your accounts. Nothing here moves money.</p>` });
 }
 
 function rulesPage({ rules, o = {} }) {
@@ -257,4 +336,4 @@ ${notice(o)}
 <p><button class="fin-btn fin-btn--danger" type="submit">Delete everything</button></p></form></section>` });
 }
 
-module.exports = { page, welcome, home, accountPage, monthPage, dataPage, rulesPage, billsPage, goalsPage, money, esc, monthName };
+module.exports = { page, welcome, home, accountPage, monthPage, dataPage, rulesPage, billsPage, goalsPage, aheadPage, lineChart, money, esc, monthName };

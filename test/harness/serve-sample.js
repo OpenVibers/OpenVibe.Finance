@@ -36,6 +36,16 @@ const ADA = 'usr_01JCZ3NDEKTSV4RRFFQ69G5FAW';
 2026-11-16,Gym Monthly,-29.00,Subscriptions
 `;
     await store.importRows(ADA, checking.id, readCsv(csv).rows);
+    // Three earlier months, so the average month (Net worth and what if) has something to stand on.
+    for (const [m, extra] of [['2026-08', 0], ['2026-09', 12000], ['2026-10', -8000]]) {
+        await store.importRows(ADA, checking.id, [
+            { posted_on: `${m}-01`, amount_cents: 312000, payee: 'Paycheck ACME Corp', category: 'Income' },
+            { posted_on: `${m}-01`, amount_cents: -145000, payee: 'Lakeview Apartments', category: 'Housing' },
+            { posted_on: `${m}-04`, amount_cents: -42000 - extra, payee: 'Corner Grocer', category: 'Groceries' },
+            { posted_on: `${m}-09`, amount_cents: -7130, payee: 'City Power & Light', category: 'Utilities' },
+            { posted_on: `${m}-15`, amount_cents: -38500, payee: 'Eating out, various', category: 'Eating out' },
+        ]);
+    }
     await store.importRows(ADA, card.id, readCsv('Date,Payee,Amount\n2026-11-07,Airline Tickets,-412.20\n2026-11-10,Hotel Downtown,-268.00\n').rows);
     await store.setBudget(ADA, 'Eating out', 4000);
     await store.setBudget(ADA, 'Groceries', 40000);
