@@ -10,7 +10,7 @@ to connect.
 - **No money moves.** It reads and plans; it never pays, transfers or cancels anything.
 - **Yours to take.** Download everything as one JSON file, or delete everything, at `/data`.
 
-## What it does today (v0.8)
+## What it does today (v0.9)
 
 - Accounts (checking, savings, credit card, cash, loan, investments) with an opening balance and a running balance.
 - Transactions typed in, or imported from a bank's download:
@@ -40,6 +40,9 @@ Plan: `OpenVibe_Plan_2026-11-13.md` §L.2. Next: the Link plugin
 for local-only import, and Finance Experts (Budget Coach, Subscription Auditor) with narrow read permission.
 
 ## For agents: /mcp
+
+OpenVibe's money Experts on Actor (Budget coach, Can I afford it?, Debt planner, Subscription auditor) use it once the
+person allows Actor in OpenVibe Finance on their Apps page; the home page links them.
 
 `POST https://openvibe.finance/mcp` is an MCP server (both eras: the 2026-07-28 stateless protocol and the handshake
 one) with seven tools, every one read only: `accounts`, `month`, `transactions`, `recurring`, `goals`, `net_worth`,

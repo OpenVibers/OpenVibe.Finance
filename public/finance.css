@@ -169,3 +169,10 @@ html[data-ov-motion="off"] .fin-result { animation: none; }
 .fin-when-label { font-weight: 600; }
 .fin-chips--scroll .fin-chip { flex: 0 0 auto; }
 .fin-chips--scroll .fin-chip span { padding: 0 14px; white-space: nowrap; }
+/* Ask an Expert (v0.9): Actor's money Experts, which read here as the person once allowed. */
+.fin-expert-list { list-style: none; padding: 0; margin: 0 0 8px; display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); }
+.fin-expert { display: grid; gap: 2px; align-content: center; min-height: 60px; padding: 10px 14px; border-radius: 14px; border: 1px solid var(--border, #1f2937); color: inherit; text-decoration: none; transition: border-color .12s ease, transform .12s ease; }
+.fin-expert span { color: var(--text-secondary, #9aa4b2); font-size: 14px; line-height: 1.4; }
+.fin-expert:hover { border-color: var(--accent, #5b8cff); }
+.fin-expert:active { transform: scale(.98); }
+html[data-ov-motion="off"] .fin-expert { transition: none; }
