@@ -10,7 +10,7 @@ to connect.
 - **No money moves.** It reads and plans; it never pays, transfers or cancels anything.
 - **Yours to take.** Download everything as one JSON file, or delete everything, at `/data`.
 
-## What it does today (v0.10)
+## What it does today (v0.11)
 
 - Accounts (checking, savings, credit card, cash, loan, investments) with an opening balance and a running balance.
 - Transactions typed in, or imported from a bank's download:
@@ -18,6 +18,8 @@ to connect.
     category), with the date and amount shapes banks send;
   - OFX and QFX (Quicken), 1.x and 2.x, bank and credit-card statements: the bank's own transaction id (FITID) makes
     repeated and overlapping downloads add each transaction once.
+  - a PDF statement (text PDFs): read on openvibe.finance and never sent anywhere; the lines with a date and an
+    amount, money in and out as marked (or as the person chooses when nothing marks them), checked before importing.
   Importing the same file twice adds nothing twice.
 - Categories, corrected per transaction (each correction is a new revision; the category says where it came from).
 - Category rules: tick **Always** on a transaction's category and every transaction whose payee contains its words

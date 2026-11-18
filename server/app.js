@@ -22,6 +22,8 @@ const { perMonth } = require('./plan');
 /** A bank's export, whichever it is: OFX or QFX by its header, else CSV. */
 const readExport = (text) => (isOfx(text) ? readOfx(text) : readCsv(text));
 const { findRecurring } = require('./recurring');
+const { pdfText } = require('./pdf');
+const { readStatement } = require('./statement');
 const v = require('./views');
 
 function createApp({ db, vault, auth, mcpAuth = null, baseUrl = 'https://openvibe.finance', now = () => new Date() }) {
@@ -126,6 +128,44 @@ function createApp({ db, vault, auth, mcpAuth = null, baseUrl = 'https://openvib
         if (cents == null) throw new FinanceError(422, 'finance.transaction.amount', 'The amount is not a number.');
         const t = await store.addTransaction(me, req.params.id, { posted_on: req.body.posted_on, amount_cents: cents, payee: req.body.payee, category: req.body.category });
         res.redirect(303, `/accounts/${encodeURIComponent(req.params.id)}?m=${t.posted_on.slice(0, 7)}&added=1`);
+    }));
+    // A statement PDF (v0.11): read here, never sent anywhere; the person checks the rows before anything is imported.
+    const pdfForm = express.urlencoded({ extended: false, limit: '9mb' });
+    app.post('/accounts/:id/statement', pdfForm, handle(async (req, res) => {
+        const me = who(req);
+        if (!me) return signIn(req, res);
+        if (!sameOrigin(req)) return res.status(403).send('A change must come from openvibe.finance itself.');
+        const account = await store.account(me, req.params.id);
+        if (!account) throw new FinanceError(404, 'finance.account.not_found', 'No such account of yours.');
+        const b64 = String(req.body.pdf || '').replace(/^data:[^,]*,/, '');
+        const bytes = Buffer.from(b64, 'base64');
+        if (!bytes.length) throw new FinanceError(422, 'finance.statement.empty', 'Choose a statement PDF first.');
+        if (bytes.length > 6 * 1024 * 1024) throw new FinanceError(413, 'finance.statement.too_large', 'That PDF is over 6 MB.');
+        const text = pdfText(bytes);
+        if (!text.pages.length) throw new FinanceError(422, 'finance.statement.unreadable', `This PDF could not be read: ${text.reason}. Your bank's CSV, OFX or QFX download works too.`);
+        const read = readStatement(text.pages.join('\n'), { today: now().toISOString().slice(0, 10) });
+        if (read.problem) throw new FinanceError(422, 'finance.statement.no_rows', `${read.problem} Your bank's CSV, OFX or QFX download works too.`);
+        res.send(v.statementPreview({ account, read, name: String(req.body.name || '').slice(0, 120) }));
+    }));
+    app.post('/accounts/:id/statement/import', pdfForm, handle(async (req, res) => {
+        const me = who(req);
+        if (!me) return signIn(req, res);
+        if (!sameOrigin(req)) return res.status(403).send('A change must come from openvibe.finance itself.');
+        let rows;
+        try { rows = JSON.parse(String(req.body.rows || '[]')); } catch { rows = null; }
+        if (!Array.isArray(rows) || !rows.length || rows.length > 2000) throw new FinanceError(422, 'finance.statement.rows', 'Read the PDF again.');
+        const take = new Set([].concat(req.body.take || []).map((x) => Number(x)));
+        const turn = String(req.body.signs || 'asread');
+        const chosen = rows.map((r, i) => ({ r, i })).filter(({ i }) => take.has(i)).map(({ r }) => {
+            const cents = Number(r && r.amount_cents);
+            if (!Number.isSafeInteger(cents)) throw new FinanceError(422, 'finance.statement.rows', 'Read the PDF again.');
+            return { posted_on: String(r.posted_on || ''), payee: String(r.payee || ''), memo: '', category: '',
+                amount_cents: turn === 'out' ? -Math.abs(cents) : turn === 'in' ? Math.abs(cents) : cents };
+        });
+        if (!chosen.length) throw new FinanceError(422, 'finance.statement.none', 'Tick at least one transaction to import.');
+        const out = await store.importRows(me, req.params.id, chosen);
+        const latest = chosen.map((r) => r.posted_on).sort().pop();
+        res.redirect(303, `/accounts/${encodeURIComponent(req.params.id)}?m=${latest.slice(0, 7)}&imported=${out.added},${out.skipped}`);
     }));
     app.post('/accounts/:id/import', form, handle(async (req, res) => {
         const me = who(req);

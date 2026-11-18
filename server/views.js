@@ -245,6 +245,31 @@ ${error ? `<p class="fin-error" role="alert">${esc(error)}</p>` : ''}${result}${
 <p class="fin-note">Roughly: your average month of the last three, repeated from next month. Money to spend is checking, savings and cash, less what cards owe; investments and loans are left out, as are transfers between your accounts. Nothing here moves money.</p>` });
 }
 
+/** A statement PDF's rows to check before importing (v0.11). Nothing is saved until Import. */
+function statementPreview({ account, read, name = '' }) {
+    const rows = read.rows;
+    const guessed = read.signs !== 'explicit';
+    const total = (list) => list.reduce((n, r) => n + r.amount_cents, 0);
+    const list = rows.map((r, i) => `<li class="fin-pick"><label><input type="checkbox" name="take" value="${i}" checked>
+<span class="fin-pick-date">${esc(r.posted_on)}</span><span class="fin-pick-payee">${esc(r.payee)}</span>
+<span class="fin-pick-amount${r.amount_cents < 0 ? ' is-neg' : ' is-pos'}">${esc(money(r.amount_cents, account.currency))}</span></label></li>`).join('');
+    const ins = rows.filter((r) => r.amount_cents > 0), outs = rows.filter((r) => r.amount_cents < 0);
+    return page({
+        title: 'Check the statement', path: `/accounts/${account.id}`, body: `
+<header class="fin-head"><p class="fin-crumb"><a href="/accounts/${esc(account.id)}">${esc(account.name)}</a></p><h1>Check the statement</h1>
+<p class="fin-sub">${esc(name || 'Your PDF')}: ${rows.length} transaction${rows.length === 1 ? '' : 's'} found, ${esc(money(total(ins), account.currency))} in and ${esc(money(-total(outs), account.currency))} out. Untick any that are not right.</p></header>
+<form class="fin-form" method="post" action="/accounts/${esc(account.id)}/statement/import">
+<input type="hidden" name="rows" value="${esc(JSON.stringify(rows.map((r) => ({ posted_on: r.posted_on, amount_cents: r.amount_cents, payee: r.payee }))))}">
+${guessed ? `<fieldset class="fin-chips"><legend>The PDF does not mark money in and out. Read the amounts as</legend>
+<label class="fin-chip"><input type="radio" name="signs" value="asread" checked><span>As shown (deposits and refunds in)</span></label>
+<label class="fin-chip"><input type="radio" name="signs" value="out"><span>All money out</span></label>
+<label class="fin-chip"><input type="radio" name="signs" value="in"><span>All money in</span></label></fieldset>` : '<input type="hidden" name="signs" value="asread">'}
+<ul class="fin-picks">${list}</ul>
+<p class="fin-actions"><button class="fin-btn fin-btn--primary" type="submit">Import the ticked ones</button><a class="fin-btn" href="/accounts/${esc(account.id)}">Cancel</a></p>
+<p class="fin-note">It was read on openvibe.finance and the PDF was not kept. Importing the same statement twice adds nothing twice.</p>
+</form>` });
+}
+
 function rulesPage({ rules, o = {} }) {
     return page({
         title: 'Your category rules', path: '/rules', body: `
@@ -280,10 +305,11 @@ ${notice(o)}${cats}
 <label class="fin-field"><span>Category</span><input name="category" list="fin-cats" maxlength="60" autocomplete="off" placeholder="Groceries"></label>
 <p><button class="fin-btn fin-btn--primary" type="submit">Add it</button></p>
 </form></details>
-<details class="fin-fold"><summary>Import a bank's export (CSV, OFX or QFX)</summary>
-<form class="fin-form" method="post" action="/accounts/${esc(account.id)}/import">
-<p class="fin-note">Banks offer a download as CSV, OFX or QFX (Quicken). Any of them works; importing the same file twice adds nothing twice.</p>
-<label class="fin-file"><input type="file" accept=".csv,.ofx,.qfx,text/csv,text/plain,application/x-ofx" data-fin-file="csv"><span class="fin-btn">Choose a file</span><span class="fin-file-name" data-fin-file-name>No file chosen yet</span></label>
+<details class="fin-fold"><summary>Import a bank's export (CSV, OFX, QFX or a PDF statement)</summary>
+<form class="fin-form" method="post" action="/accounts/${esc(account.id)}/import" data-fin-statement="/accounts/${esc(account.id)}/statement">
+<p class="fin-note">Banks offer a download as CSV, OFX or QFX (Quicken). Any of them works; importing the same file twice adds nothing twice. A PDF statement is read here, on openvibe.finance, and you check what it found before anything is imported.</p>
+<input type="hidden" name="pdf" value="" data-fin-pdf><input type="hidden" name="name" value="" data-fin-pdf-name>
+<label class="fin-file"><input type="file" accept=".csv,.ofx,.qfx,.pdf,text/csv,text/plain,application/x-ofx,application/pdf" data-fin-file="csv"><span class="fin-btn">Choose a file</span><span class="fin-file-name" data-fin-file-name>No file chosen yet</span></label>
 <label class="fin-field"><span>Or paste it</span><textarea name="csv" rows="6" required data-fin-csv placeholder="Date,Description,Amount&#10;2026-11-02,Corner Grocer,-23.18"></textarea></label>
 <p><button class="fin-btn fin-btn--primary" type="submit">Import</button></p>
 </form></details>
@@ -349,4 +375,4 @@ ${notice(o)}
 <p><button class="fin-btn fin-btn--danger" type="submit">Delete everything</button></p></form></section>` });
 }
 
-module.exports = { page, welcome, home, accountPage, monthPage, dataPage, rulesPage, billsPage, goalsPage, aheadPage, lineChart, money, esc, monthName };
+module.exports = { page, welcome, home, accountPage, monthPage, dataPage, rulesPage, billsPage, goalsPage, aheadPage, statementPreview, lineChart, money, esc, monthName };
