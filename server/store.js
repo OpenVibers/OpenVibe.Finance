@@ -14,6 +14,9 @@
  *   removeTransaction(owner, id)
  *   importRows(owner, accountId, rows)      → { import_id, read, added, skipped } (the same row twice is one)
  *   month(owner, 'YYYY-MM')                 → { month, income_cents, spent_cents, by_category: [{ category, cents, count }] }
+ *   rules(owner)                            → [{ id, match, category }] (longest words first)
+ *   addRule(owner, { match, category })     the same words again replace the category; applied to the past
+ *   removeRule(owner, id)
  *   exportAll(owner)                        → everything, opened (the person's own copy)
  *   removeAll(owner)                        → everything of theirs deleted
  */
@@ -35,6 +38,9 @@ function cleanCategory(c) {
     const t = String(c || '').replace(/\s+/g, ' ').trim().slice(0, 60);
     return t || 'Uncategorized';
 }
+
+/** Words for matching: lower case, one space, no digits-only runs (card and reference numbers change every time). */
+const matchable = (t) => String(t || '').toLowerCase().replace(/\b\d{3,}\b/g, ' ').replace(/[^a-z0-9&'.\- ]+/g, ' ').replace(/\s+/g, ' ').trim();
 
 function createStore({ db, vault }) {
     const own = (owner) => { if (!/^usr_[0-9A-Za-z]{10,40}$/.test(String(owner || ''))) fail(401, 'finance.person', 'Sign in first.'); return owner; };
@@ -130,6 +136,7 @@ function createStore({ db, vault }) {
         if (!acc) fail(404, 'finance.account.not_found', 'No such account of yours.');
         const list = Array.isArray(rows) ? rows.slice(0, 20000) : [];
         const importId = newId('imp');
+        const known = await rules(owner);
         let added = 0;
         await db.tx(async (t) => {
             await t.exec('INSERT INTO finance_imports (id, owner, account_id, format, rows_read) VALUES ($1, $2, $3, $4, $5)', [importId, owner, acc.id, 'csv', list.length]);
@@ -137,13 +144,15 @@ function createStore({ db, vault }) {
             const seen = new Map();
             for (const input of list) {
                 const r = checkRow(input);
+                let from = r.category === 'Uncategorized' ? 'none' : 'file';
+                if (from === 'none') { const hit = ruleFor(known, r.payee); if (hit) { r.category = hit.category; from = 'rule'; } }
                 const key = `${acc.id}|${r.posted_on}|${r.amount_cents}|${r.payee.toLowerCase()}`;
                 const nth = (seen.get(key) || 0) + 1;
                 seen.set(key, nth);
                 const out = await t.exec(`INSERT INTO finance_transactions (id, owner, account_id, posted_on, amount_cents, payee_enc, memo_enc, category, category_from, import_id, dedupe)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) ON CONFLICT (account_id, dedupe) WHERE dedupe IS NOT NULL DO NOTHING`,
                 [newId('txn'), owner, acc.id, r.posted_on, r.amount_cents, vault.seal(owner, r.payee), vault.seal(owner, r.memo), r.category,
-                    r.category === 'Uncategorized' ? 'none' : 'file', importId, vault.mark(owner, `${key}|${nth}`)]);
+                    from, importId, vault.mark(owner, `${key}|${nth}`)]);
                 if (out) added++;
             }
             await t.exec('UPDATE finance_imports SET rows_added = $2, rows_skipped = $3 WHERE id = $1', [importId, added, list.length - added]);
@@ -171,6 +180,51 @@ function createStore({ db, vault }) {
         return { month: m, income_cents: income, spent_cents: spent, by_category: by };
     }
 
+    async function rules(owner) {
+        own(owner);
+        const rows = await db.many('SELECT id, match_enc, category FROM finance_rules WHERE owner = $1', [owner]);
+        return rows.map((r) => ({ id: r.id, match: vault.open(owner, r.match_enc), category: r.category })).sort((a, b) => b.match.length - a.match.length);
+    }
+    /** The rule a payee falls under: the longest words it contains. */
+    const ruleFor = (list, payee) => { const p = matchable(payee); return p ? list.find((r) => p.includes(r.match)) || null : null; };
+
+    /** Put every uncategorised transaction of the person (or of one account) under the rules. → how many changed. */
+    async function applyRules(owner, list = null) {
+        const all = list || await rules(owner);
+        if (!all.length) return 0;
+        const rows = await db.many("SELECT id, payee_enc FROM finance_transactions WHERE owner = $1 AND category_from = 'none' LIMIT 20000", [owner]);
+        let changed = 0;
+        for (const r of rows) {
+            const hit = ruleFor(all, vault.open(owner, r.payee_enc));
+            if (!hit) continue;
+            changed += await db.exec(`UPDATE finance_transactions SET category = $3, category_from = 'rule', revision = revision + 1, updated_at = now()
+                WHERE id = $1 AND owner = $2 AND category_from = 'none'`, [r.id, owner, hit.category]);
+        }
+        return changed;
+    }
+
+    async function addRule(owner, input = {}) {
+        own(owner);
+        const match = matchable(input.match).slice(0, 120);
+        if (match.length < 2) fail(422, 'finance.rule.match', 'A rule needs a few words of the payee.');
+        const category = cleanCategory(input.category);
+        if (category === 'Uncategorized') fail(422, 'finance.rule.category', 'Say which category it is.');
+        const count = Number(await db.value('SELECT count(*) FROM finance_rules WHERE owner = $1', [owner]));
+        const mark = vault.mark(owner, `rule|${match}`);
+        const known = await db.maybe('SELECT id FROM finance_rules WHERE owner = $1 AND match_mark = $2', [owner, mark]);
+        if (!known && count >= 500) fail(422, 'finance.rule.limit', 'Five hundred rules is the most for now.');
+        const id = known ? known.id : newId('rul');
+        await db.exec(`INSERT INTO finance_rules (id, owner, match_enc, match_mark, category) VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (owner, match_mark) DO UPDATE SET category = EXCLUDED.category`, [id, owner, vault.seal(owner, match), mark, category]);
+        const applied = await applyRules(owner);
+        return { id, match, category, applied };
+    }
+
+    async function removeRule(owner, id) {
+        own(owner);
+        await db.exec('DELETE FROM finance_rules WHERE id = $1 AND owner = $2', [String(id || ''), owner]);
+    }
+
     async function exportAll(owner) {
         own(owner);
         const accs = await db.many('SELECT id, name, kind, currency, opening_cents, created_at, archived_at FROM finance_accounts WHERE owner = $1 ORDER BY created_at', [owner]);
@@ -179,6 +233,7 @@ function createStore({ db, vault }) {
             exported_at: new Date().toISOString(), format: 'openvibe.finance.export@1',
             accounts: accs.map((a) => ({ ...a, opening_cents: Number(a.opening_cents) })),
             transactions: txns.map((r) => open(owner, r)),
+            rules: (await rules(owner)).map((r) => ({ match: r.match, category: r.category })),
         };
     }
 
@@ -187,11 +242,12 @@ function createStore({ db, vault }) {
         await db.tx(async (t) => {
             await t.exec('DELETE FROM finance_transactions WHERE owner = $1', [owner]);
             await t.exec('DELETE FROM finance_imports WHERE owner = $1', [owner]);
+            await t.exec('DELETE FROM finance_rules WHERE owner = $1', [owner]);
             await t.exec('DELETE FROM finance_accounts WHERE owner = $1', [owner]);
         });
     }
 
-    return { accounts, account, addAccount, transactions, addTransaction, setCategory, removeTransaction, importRows, month, exportAll, removeAll };
+    return { accounts, account, addAccount, transactions, addTransaction, setCategory, removeTransaction, importRows, month, rules, addRule, removeRule, applyRules, exportAll, removeAll };
 }
 
-module.exports = { createStore, FinanceError, KINDS, CATEGORIES };
+module.exports = { createStore, FinanceError, KINDS, CATEGORIES, matchable };

@@ -86,3 +86,12 @@ html[data-ov-motion="off"] .fin-btn:active, html[data-ov-motion="off"] .fin-acco
 .fin-file input { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
 .fin-file input:focus-visible + .fin-btn { outline: 2px solid var(--accent, #5b8cff); outline-offset: 2px; }
 .fin-file-name { color: var(--text-secondary, #9aa4b2); font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Category rules (v0.2). */
+.fin-always { display: inline-flex; align-items: center; gap: 4px; min-height: 36px; font-size: 13px; color: var(--text-secondary, #9aa4b2); cursor: pointer; }
+.fin-always input { width: 16px; height: 16px; accent-color: var(--accent, #5b8cff); }
+.fin-by-rule { color: var(--text-secondary, #9aa4b2); font-size: 12px; }
+.fin-rules { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.fin-rules li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--border, #1f2937); }
+.fin-rule-what { display: grid; gap: 2px; min-width: 0; }
+.fin-rule-what b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fin-rule-what span { color: var(--text-secondary, #9aa4b2); font-size: 14px; }

@@ -10,17 +10,19 @@ to connect.
 - **No money moves.** It reads and plans; it never pays, transfers or cancels anything.
 - **Yours to take.** Download everything as one JSON file, or delete everything, at `/data`.
 
-## What it does today (v0.1)
+## What it does today (v0.2)
 
 - Accounts (checking, savings, credit card, cash, loan, investments) with an opening balance and a running balance.
 - Transactions typed in, or imported from a bank's CSV export: the columns are read from the header (date; amount, or
   debit and credit; payee or description; memo; category), with the date and amount shapes banks send. Importing the
   same file twice adds nothing twice.
 - Categories, corrected per transaction (each correction is a new revision; the category says where it came from).
+- Category rules: tick **Always** on a transaction's category and every transaction whose payee contains its words
+  goes there, past and future imports (never one you categorised yourself). `/rules` lists and removes them.
 - The month: money in, money out, and spending by category (transfers between your accounts left out).
 - A JSON API for all of it (`/api/v1/…`), for the person signed in.
 
-Plan: `OpenVibe_Plan_2026-11-13.md` §L.2. Next: rules and recurring bills, budgets, goals, OFX/QFX, the Link plugin
+Plan: `OpenVibe_Plan_2026-11-13.md` §L.2. Next: recurring bills, budgets, goals, OFX/QFX, the Link plugin
 for local-only import, and Finance Experts (Budget Coach, Subscription Auditor) with narrow read permission.
 
 ## Running
