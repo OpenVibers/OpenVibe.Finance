@@ -46,6 +46,7 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             assert.strictEqual(home.status, 200);
             assert.match(home.text, /Your money, your rules, your data/);
             assert.match(home.text, /No money moves/);
+            assert.match(home.text, /href="\/finance\.css\?v=[0-9a-f]{10}"><script src="\/finance\.js\?v=[0-9a-f]{10}" defer>/, 'our files by their content');
             assert.strictEqual(home.headers.get('cache-control'), 'private, no-store');
             const month = await go('/month');
             assert.strictEqual(month.status, 303);

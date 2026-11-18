@@ -9,6 +9,22 @@ const serve = require('openvibe-shared/serve');
 const { CATEGORIES, KINDS } = require('./store');
 const { payoff, faster, perMonth } = require('./plan');
 
+// Our own files by their content (a release's change is a new address, so neither a browser nor Cloudflare keeps an old
+// one for the hour they may cache it): /x.css?v=<first 10 hex of its sha256>, read once at boot.
+const asset = (() => {
+    const fs = require('node:fs');
+    const crypto = require('node:crypto');
+    const kept = new Map();
+    return (name) => {
+        if (!kept.has(name)) {
+            let v = 'dev';
+            try { v = crypto.createHash('sha256').update(fs.readFileSync(require('node:path').join(__dirname, '..', 'public', name))).digest('hex').slice(0, 10); } catch { /* missing in a test: unversioned */ }
+            kept.set(name, `/${name}?v=${v}`);
+        }
+        return kept.get(name);
+    };
+})();
+
 const SITE = 'https://openvibe.finance';
 const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const money = (cents, currency = 'USD') => {
@@ -24,7 +40,7 @@ function page({ title, body, path = '/', description = 'Your money, your rules, 
         name: 'OpenVibe.Finance', siteName: 'OpenVibe.Finance', title, description, canonical: `${SITE}${path}`, robots,
         navbar: { service: 'finance', apiBase: 'https://openvibe.network', links: [{ label: 'Money', href: '/' }, { label: 'This month', href: '/month' }, { label: 'Recurring', href: '/bills' }, { label: 'Goals', href: '/goals' }, { label: 'What if', href: '/ahead' }] },
         footer: { service: 'finance', variant: 'full', mount: '#ov-footer' },
-        head: `<link rel="stylesheet" href="${serve.url('kit.css')}"><link rel="stylesheet" href="/finance.css"><script src="/finance.js" defer></script>`,
+        head: `<link rel="stylesheet" href="${serve.url('kit.css')}"><link rel="stylesheet" href="${asset('finance.css')}"><script src="${asset('finance.js')}" defer></script>`,
         body: `<div id="navbar-mount"></div><main id="main" class="ovk-page fin">${body}</main>`,
     });
 }
