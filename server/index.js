@@ -14,8 +14,12 @@ async function main() {
     const env = process.env;
     const port = Number(env.PORT || 5292);
     const baseUrl = env.BASE_URL || 'https://openvibe.finance';
-    const db = createDb({ service: 'finance' });
-    await db.migrate({ dir: path.join(__dirname, '..', 'migrations') });
+    // Migrations with the owner role on a direct connection (the runtime role through PgBouncer may only read and write
+    // rows: OpenVibe.Host roles/data/add-service.sh), then the runtime handle.
+    if (!env.DATABASE_URL || !env.DATABASE_DIRECT_URL) throw new Error('DATABASE_URL and DATABASE_DIRECT_URL are required (OpenVibe.Host roles/data/add-service.sh finance)');
+    const owner = createDb({ url: env.DATABASE_DIRECT_URL, service: 'finance-migrate', max: 1 });
+    try { await owner.migrate({ dir: path.join(__dirname, '..', 'migrations') }); } finally { await owner.close(); }
+    const db = createDb({ url: env.DATABASE_URL, service: 'finance' });
     const vault = createVault(env.FINANCE_DATA_KEY);
     const auth = env.OV_OAUTH_CLIENT_ID && env.OV_OAUTH_CLIENT_SECRET ? createSsoClient({
         site: 'finance', siteName: 'OpenVibe.Finance', baseUrl, clientId: env.OV_OAUTH_CLIENT_ID, clientSecret: env.OV_OAUTH_CLIENT_SECRET,
