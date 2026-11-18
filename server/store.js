@@ -159,10 +159,13 @@ function createStore({ db, vault }) {
                 const key = `${acc.id}|${r.posted_on}|${r.amount_cents}|${r.payee.toLowerCase()}`;
                 const nth = (seen.get(key) || 0) + 1;
                 seen.set(key, nth);
+                // The bank's own transaction id (an OFX/QFX FITID) is exact: the same download twice, or two that
+                // overlap, add each transaction once.
+                const fitid = typeof input.fitid === 'string' && input.fitid.trim() ? input.fitid.trim().slice(0, 255) : null;
                 const out = await t.exec(`INSERT INTO finance_transactions (id, owner, account_id, posted_on, amount_cents, payee_enc, memo_enc, category, category_from, import_id, dedupe)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) ON CONFLICT (account_id, dedupe) WHERE dedupe IS NOT NULL DO NOTHING`,
                 [newId('txn'), owner, acc.id, r.posted_on, r.amount_cents, vault.seal(owner, r.payee), vault.seal(owner, r.memo), r.category,
-                    from, importId, vault.mark(owner, `${key}|${nth}`)]);
+                    from, importId, vault.mark(owner, fitid ? `fitid|${acc.id}|${fitid}` : `${key}|${nth}`)]);
                 if (out) added++;
             }
             await t.exec('UPDATE finance_imports SET rows_added = $2, rows_skipped = $3 WHERE id = $1', [importId, added, list.length - added]);
