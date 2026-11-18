@@ -7,6 +7,7 @@
 const shell = require('openvibe-shared/shell');
 const serve = require('openvibe-shared/serve');
 const { CATEGORIES, KINDS } = require('./store');
+const { payoff, faster, perMonth } = require('./plan');
 
 const SITE = 'https://openvibe.finance';
 const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -21,7 +22,7 @@ const KIND_WORDS = { checking: 'Checking', savings: 'Savings', credit: 'Credit c
 function page({ title, body, path = '/', description = 'Your money, your rules, your data: accounts, imports and a monthly picture, private to you.', robots = 'noindex, nofollow' }) {
     return shell.page({
         name: 'OpenVibe.Finance', siteName: 'OpenVibe.Finance', title, description, canonical: `${SITE}${path}`, robots,
-        navbar: { service: 'finance', apiBase: 'https://openvibe.network', links: [{ label: 'Money', href: '/' }, { label: 'This month', href: '/month' }, { label: 'Recurring', href: '/bills' }] },
+        navbar: { service: 'finance', apiBase: 'https://openvibe.network', links: [{ label: 'Money', href: '/' }, { label: 'This month', href: '/month' }, { label: 'Recurring', href: '/bills' }, { label: 'Goals', href: '/goals' }] },
         footer: { service: 'finance', variant: 'full', mount: '#ov-footer' },
         head: `<link rel="stylesheet" href="${serve.url('kit.css')}"><link rel="stylesheet" href="/finance.css"><script src="/finance.js" defer></script>`,
         body: `<div id="navbar-mount"></div><main id="main" class="ovk-page fin">${body}</main>`,
@@ -69,7 +70,7 @@ ${accounts.length ? `<section class="fin-month-card" aria-label="${esc(monthName
 <label class="fin-field"><span>Balance before the first transaction</span><input name="opening" inputmode="decimal" placeholder="0.00" autocomplete="off"></label></div>
 <p><button class="fin-btn fin-btn--primary" type="submit">Add the account</button></p>
 </form></details>
-<p class="fin-foot"><a href="/bills">Recurring bills</a> · <a href="/rules">Your category rules</a> · <a href="/data">Your data: download or delete everything</a></p>` });
+<p class="fin-foot"><a href="/goals">Goals and debt</a> · <a href="/bills">Recurring bills</a> · <a href="/rules">Your category rules</a> · <a href="/data">Your data: download or delete everything</a></p>` });
 }
 
 const CADENCE_WORDS = { weekly: 'Every week', 'every two weeks': 'Every two weeks', monthly: 'Every month', quarterly: 'Every three months', yearly: 'Every year' };
@@ -92,6 +93,64 @@ ${notice(o)}
 ${soon.length ? `<section class="fin-sec"><h2>The next 31 days</h2><ul class="fin-bills">${soon.map(row).join('')}</ul></section>` : ''}
 <section class="fin-sec"><h2>Bills and subscriptions</h2>${out.length ? `<ul class="fin-bills">${out.map(row).join('')}</ul>` : '<p class="fin-empty">None found yet. A few months of transactions show them.</p>'}</section>
 ${income.length ? `<section class="fin-sec"><h2>Money that comes in regularly</h2><ul class="fin-bills">${income.map(row).join('')}</ul></section>` : ''}` });
+}
+
+const monthsWords = (n) => (n < 12 ? `${n} month${n === 1 ? '' : 's'}` : `${Math.floor(n / 12)} year${n >= 24 ? 's' : ''}${n % 12 ? ` ${n % 12} month${n % 12 === 1 ? '' : 's'}` : ''}`);
+const pct = (bps) => `${(bps / 100).toFixed(2).replace(/\.?0+$/, '')}%`;
+
+function goalsPage({ goals, accounts, today, o = {} }) {
+    const debts = accounts.filter((a) => (a.kind === 'loan' || a.kind === 'credit'));
+    const savings = accounts.filter((a) => a.kind !== 'loan' && a.kind !== 'credit');
+    const goalRow = (g) => {
+        const have = Math.max(0, g.have_cents);
+        const done = have >= g.target_cents;
+        const need = perMonth({ target_cents: g.target_cents, have_cents: have, target_on: g.target_on, today });
+        const tracked = g.account_id ? accounts.find((a) => a.id === g.account_id) : null;
+        return `<li class="fin-goal${done ? ' is-done' : ''}"><div class="fin-goal-top"><b>${esc(g.name)}</b><span>${esc(money(have))} of ${esc(money(g.target_cents))}</span></div>
+<span class="fin-bar fin-bar--budget"><span style="--w:${Math.min(100, Math.round((have / g.target_cents) * 100))}%"></span></span>
+<p class="fin-goal-note">${done ? 'Reached.' : need ? `${esc(money(need))} a month reaches it by ${esc(monthName(g.target_on.slice(0, 7)))}.` : g.target_on ? `The date (${esc(monthName(g.target_on.slice(0, 7)))}) has passed.` : 'No date: it is there when it is there.'}
+${tracked ? ` Tracks <a href="/accounts/${esc(tracked.id)}">${esc(tracked.name)}</a>.` : ''}</p>
+<div class="fin-goal-tools">${tracked ? '' : `<form method="post" action="/goals/${esc(g.id)}/saved" class="fin-cat"><label class="fin-saved"><span>Saved</span><input name="saved" inputmode="decimal" value="${(g.saved_cents / 100).toFixed(2)}" autocomplete="off"></label><button type="submit" class="fin-mini">Update</button></form>`}
+<form method="post" action="/goals/${esc(g.id)}/delete" class="fin-goal-remove"><button type="submit" class="fin-mini fin-mini--quiet">Remove</button></form></div></li>`;
+    };
+    const debtRow = (a) => {
+        const owed = Math.max(0, -a.balance_cents);
+        const terms = a.apr_bps != null && a.payment_cents;
+        let said = 'Add its yearly rate and your monthly payment to see when it is paid off.';
+        let tip = '';
+        if (!owed) said = 'Nothing owed.';
+        else if (terms) {
+            const p = payoff({ owed_cents: owed, apr_bps: a.apr_bps, payment_cents: a.payment_cents });
+            if (p.never) said = `At ${esc(money(a.payment_cents))} a month it never gets paid off: that does not cover the ${esc(pct(a.apr_bps))} interest.`;
+            else {
+                const extra = Math.max(2500, Math.round(a.payment_cents * 0.25 / 500) * 500);
+                const f = faster({ owed_cents: owed, apr_bps: a.apr_bps, payment_cents: a.payment_cents }, extra);
+                said = `Paid off in <b>${esc(monthsWords(p.months))}</b> at ${esc(money(a.payment_cents))} a month, ${esc(money(p.interest_cents))} of it interest (${esc(pct(a.apr_bps))} a year).`;
+                if (f && f.months_sooner) tip = `${esc(money(extra))} more a month: ${esc(monthsWords(f.months_sooner))} sooner and ${esc(money(f.interest_saved_cents))} less interest.`;
+            }
+        }
+        return `<li class="fin-goal"><div class="fin-goal-top"><b><a href="/accounts/${esc(a.id)}">${esc(a.name)}</a></b><span>${esc(money(owed, a.currency))} owed</span></div>
+<p class="fin-goal-note">${said}</p>${tip ? `<p class="fin-goal-tip">${tip}</p>` : ''}
+${terms ? '<details class="fin-fold fin-fold--quiet"><summary>Change the rate or payment</summary>' : ''}<form class="fin-row fin-debt" method="post" action="/accounts/${esc(a.id)}/debt">
+<label class="fin-field"><span>Yearly rate (%)</span><input name="apr" inputmode="decimal" value="${a.apr_bps != null ? (a.apr_bps / 100).toFixed(2) : ''}" placeholder="24.99" autocomplete="off"></label>
+<label class="fin-field"><span>Monthly payment</span><input name="payment" inputmode="decimal" value="${a.payment_cents ? (a.payment_cents / 100).toFixed(2) : ''}" placeholder="150.00" autocomplete="off"></label>
+<p><button class="fin-btn" type="submit">Save</button></p></form>${terms ? '</details>' : ''}</li>`;
+    };
+    const accountChips = savings.map((a) => `<label class="fin-chip"><input type="radio" name="account" value="${esc(a.id)}"><span>${esc(a.name)}</span></label>`).join('');
+    return page({
+        title: 'Goals and debt', path: '/goals', body: `
+<header class="fin-head"><p class="fin-crumb"><a href="/">Your money</a></p><h1>Goals and debt</h1></header>
+${notice(o)}
+<section class="fin-sec"><h2>Goals</h2>${goals.length ? `<ul class="fin-goals">${goals.map(goalRow).join('')}</ul>` : '<p class="fin-empty">No goals yet: an emergency fund, a trip, a deposit.</p>'}
+<details class="fin-fold"><summary>Add a goal</summary>
+<form class="fin-form" method="post" action="/goals">
+<label class="fin-field"><span>Name</span><input name="name" maxlength="80" required placeholder="Emergency fund" autocomplete="off"></label>
+<div class="fin-row"><label class="fin-field"><span>Amount</span><input name="target" inputmode="decimal" required placeholder="5000" autocomplete="off"></label>
+<label class="fin-field"><span>By (optional)</span><input type="date" name="target_on"></label></div>
+${savings.length ? `<fieldset class="fin-chips"><legend>Its progress is (optional)</legend><label class="fin-chip"><input type="radio" name="account" value="" checked><span>What I enter</span></label>${accountChips}</fieldset>` : ''}
+<p><button class="fin-btn fin-btn--primary" type="submit">Add the goal</button></p>
+</form></details></section>
+<section class="fin-sec"><h2>Debt</h2>${debts.length ? `<ul class="fin-goals">${debts.map(debtRow).join('')}</ul>` : '<p class="fin-empty">No loans or credit cards. Add one as an account (its kind: Loan or Credit card) to plan paying it off.</p>'}</section>` });
 }
 
 function rulesPage({ rules, o = {} }) {
@@ -198,4 +257,4 @@ ${notice(o)}
 <p><button class="fin-btn fin-btn--danger" type="submit">Delete everything</button></p></form></section>` });
 }
 
-module.exports = { page, welcome, home, accountPage, monthPage, dataPage, rulesPage, billsPage, money, esc, monthName };
+module.exports = { page, welcome, home, accountPage, monthPage, dataPage, rulesPage, billsPage, goalsPage, money, esc, monthName };
