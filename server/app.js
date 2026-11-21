@@ -45,7 +45,18 @@ function createApp({ db, vault, auth, mcpAuth = null, baseUrl = 'https://openvib
     app.get('/api/ready', async (_req, res) => {
         try { await db.value('SELECT 1'); res.json({ status: 'ok', service: 'finance' }); } catch { res.status(503).json({ status: 'unavailable' }); }
     });
-    app.get('/robots.txt', (_req, res) => res.type('text').send('User-agent: *\nAllow: /$\nDisallow: /\n'));
+    // Every page crawlable, by every bot, AI included (the owner, 11-21: "Everything should be just crawlable"); only the
+    // sign-in plumbing stays out. A signed-out visitor (a crawler) sees the welcome, never anyone's money.
+    const seo = require('openvibe-shared/seo');
+    app.get('/robots.txt', (_req, res) => res.type('text').set('Cache-Control', 'public, max-age=3600').send(seo.robotsTxt({ disallow: ['/auth/'], sitemaps: ['https://openvibe.finance/sitemap.xml'] })));
+    app.get('/sitemap.xml', (_req, res) => res.type('application/xml').set('Cache-Control', 'public, max-age=3600').send(seo.sitemapXml([{ loc: 'https://openvibe.finance/', changefreq: 'weekly', priority: 1.0 }])));
+    app.get('/llms.txt', (_req, res) => res.type('text').set('Cache-Control', 'public, max-age=3600').send([
+        '# OpenVibe.Finance', '',
+        '> Your money, your rules, your data: accounts, imports and a monthly picture, private to you.', '',
+        'A personal finance desk on your OpenVibe account: accounts and balances, CSV imports, the month at a glance, bills, what is ahead, goals and rules. Your data is private to you and exports in full.', '',
+        '## Pages', '',
+        '- [OpenVibe.Finance](https://openvibe.finance/): what it does, and the way in with your OpenVibe account', '',
+    ].join('\n')));
     app.use(express.static(path.join(__dirname, '..', 'public'), { maxAge: '1h' }));
     app.use('/shared', require('openvibe-shared/serve').handler());
     if (auth) app.use('/auth', auth.router(express));
