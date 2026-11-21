@@ -75,5 +75,5 @@ License: AGPL-3.0-only.
 
 <!-- versions:start -->
 - openvibe-sdk: v0.188.0
-- openvibe-shared: v4.336.0
+- openvibe-shared: v4.337.0
 <!-- versions:end -->
