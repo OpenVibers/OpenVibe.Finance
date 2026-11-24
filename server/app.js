@@ -37,8 +37,13 @@ function createApp({ db, vault, auth, mcpAuth = null, baseUrl = 'https://openvib
         require('openvibe-shared/metrics').instrument(app, { service: 'finance', release: release.release });
         app.get('/release.json', release.handler);
     } catch { /* metrics are optional in tests */ }
+    // Out of the index: everything but the public welcome (GET /) and the crawl files. This header used to go on every
+    // response, the welcome too, and it outweighs the page's own "index, follow": the 11-23 crawl found the home
+    // noindex while its sitemap listed it. A signed-in person's pages (their money) get it again below.
+    const INDEXABLE = new Set(['/', '/robots.txt', '/sitemap.xml', '/llms.txt']);
     app.use((req, res, next) => {
-        res.set({ 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'same-origin', 'X-Frame-Options': 'DENY', 'X-Robots-Tag': 'noindex, nofollow' });
+        res.set({ 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'same-origin', 'X-Frame-Options': 'DENY' });
+        if (!((req.method === 'GET' || req.method === 'HEAD') && INDEXABLE.has(req.path))) res.set('X-Robots-Tag', 'noindex, nofollow');
         next();
     });
     app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'finance' }));
@@ -69,7 +74,11 @@ function createApp({ db, vault, auth, mcpAuth = null, baseUrl = 'https://openvib
         (req, res, next) => { res.set('Cache-Control', 'private, no-store'); Promise.resolve(finMcp.handler(req, res)).catch(next); });
     app.all('/mcp', (_req, res) => res.status(405).set('Allow', 'POST').json({ error: 'POST a JSON-RPC request.' }));
     app.use(auth ? auth.optionalAuth() : (_req, _res, next) => next());
-    app.use((req, res, next) => { res.set('Cache-Control', 'private, no-store'); next(); });
+    app.use((req, res, next) => {
+        res.set('Cache-Control', 'private, no-store');
+        if (req.user) res.set('X-Robots-Tag', 'noindex, nofollow');   // a signed-in page shows someone's money
+        next();
+    });
 
     // The pages and the API: the person's own sign-in only. A delegated token (something acting for them) is for /mcp.
     const { isDelegated } = require('openvibe-sdk/auth/delegated');
