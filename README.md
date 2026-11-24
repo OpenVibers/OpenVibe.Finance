@@ -74,6 +74,6 @@ Production: `/opt/openvibe.finance`, unit `openvibe-finance.service` (port 5292)
 License: AGPL-3.0-only.
 
 <!-- versions:start -->
-- openvibe-sdk: v0.188.0
+- openvibe-sdk: v0.189.0
 - openvibe-shared: v4.337.0
 <!-- versions:end -->
