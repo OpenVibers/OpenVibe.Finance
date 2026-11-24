@@ -48,7 +48,12 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             assert.match(home.text, /No money moves/);
             assert.match(home.text, /href="\/finance\.css\?v=[0-9a-f]{10}"><script src="\/finance\.js\?v=[0-9a-f]{10}" defer>/, 'our files by their content');
             assert.strictEqual(home.headers.get('cache-control'), 'private, no-store');
+            // The welcome is for search engines (the 11-23 crawl: a noindex header on it outweighed its "index, follow").
+            assert.strictEqual(home.headers.get('x-robots-tag'), null, 'the signed-out welcome may be indexed');
+            assert.match(home.text, /<meta name="robots" content="index, follow">/);
+            assert.strictEqual((await go('/', { as: ADA })).headers.get('x-robots-tag'), 'noindex, nofollow', 'a signed-in home (someone\'s money) never');
             const month = await go('/month');
+            assert.strictEqual(month.headers.get('x-robots-tag'), 'noindex, nofollow', 'nor any other page');
             assert.strictEqual(month.status, 303);
             assert.match(month.location, /^\/auth\/login\?next=/);
             assert.strictEqual((await go('/api/v1/accounts')).status, 401);
