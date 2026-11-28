@@ -40,7 +40,7 @@ function createApp({ db, vault, auth, mcpAuth = null, baseUrl = 'https://openvib
     // Out of the index: everything but the public welcome (GET /) and the crawl files. This header used to go on every
     // response, the welcome too, and it outweighs the page's own "index, follow": the 11-23 crawl found the home
     // noindex while its sitemap listed it. A signed-in person's pages (their money) get it again below.
-    const INDEXABLE = new Set(['/', '/robots.txt', '/sitemap.xml', '/llms.txt']);
+    const INDEXABLE = new Set(['/', '/robots.txt', '/sitemap.xml', '/llms.txt', '/llms-full.txt']);
     app.use((req, res, next) => {
         res.set({ 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'same-origin', 'X-Frame-Options': 'DENY' });
         if (!((req.method === 'GET' || req.method === 'HEAD') && INDEXABLE.has(req.path))) res.set('X-Robots-Tag', 'noindex, nofollow');
@@ -61,7 +61,19 @@ function createApp({ db, vault, auth, mcpAuth = null, baseUrl = 'https://openvib
         'A personal finance desk on your OpenVibe account: accounts and balances, CSV imports, the month at a glance, bills, what is ahead, goals and rules. Your data is private to you and exports in full.', '',
         '## Pages', '',
         '- [OpenVibe.Finance](https://openvibe.finance/): what it does, and the way in with your OpenVibe account', '',
+        '## Optional', '',
+        '- [Full text (llms-full.txt)](https://openvibe.finance/llms-full.txt): the page above as words', '',
     ].join('\n')));
+    // The full text for language models (SEO-33): the welcome page llms.txt lists, as Markdown from its own render
+    // (11-28: /llms-full.txt was a 404, tools/llms-check.js). Signed out, as a crawler sees it: never anyone's money.
+    app.get('/llms-full.txt', (_req, res) => {
+        const words = require('openvibe-shared/agent-layer').markdownTwin({ html: v.welcome(), canonical: 'https://openvibe.finance/' }).replace(/^---[\s\S]*?\n---\n/, '').trim();
+        res.type('text').set('Cache-Control', 'public, max-age=3600').send(seo.llmsFull({
+            site: { name: 'OpenVibe.Finance', url: 'https://openvibe.finance' },
+            summary: 'Your money, your rules, your data: accounts, imports and a monthly picture, private to you.',
+            sections: [{ title: 'OpenVibe.Finance', url: '/', body: words }],
+        }));
+    });
     app.use(express.static(path.join(__dirname, '..', 'public'), { maxAge: '1h' }));
     app.use('/shared', require('openvibe-shared/serve').handler());
     if (auth) app.use('/auth', auth.router(express));
